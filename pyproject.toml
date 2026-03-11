@@ -1,0 +1,8 @@
+[project]
+name = "crypto-sim"
+version = "0.1.0"
+description = "Dexscreener-based token tracker and trader simulator."
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
