@@ -25,6 +25,13 @@ class OpenPosition:
     amount_usd: float
 
 
+@dataclass(frozen=True)
+class LatestSnapshot:
+    token_address: str
+    market_cap: float | None
+    liquidity_usd: float | None
+
+
 class Repository:
     def __init__(self, connection: sqlite3.Connection) -> None:
         self.connection = connection
@@ -245,6 +252,7 @@ class Repository:
                 t.symbol,
                 t.name,
                 t.latest_market_cap,
+                t.latest_liquidity_usd,
                 t.pair_url
             FROM trader_positions p
             LEFT JOIN tokens t ON t.token_address = p.token_address
@@ -308,6 +316,7 @@ class Repository:
                 t.name,
                 t.latest_market_cap,
                 t.latest_price_usd,
+                t.latest_liquidity_usd,
                 t.pair_url
             FROM trader_positions p
             LEFT JOIN tokens t ON t.token_address = p.token_address
@@ -443,14 +452,20 @@ class Repository:
                 COALESCE(SUM(
                     CASE
                         WHEN p.status = 'OPEN' AND t.latest_market_cap IS NOT NULL AND p.opened_market_cap > 0
-                        THEN (p.amount_usd * (t.latest_market_cap / p.opened_market_cap)) - p.amount_usd
+                        THEN MIN(
+                            p.amount_usd * (t.latest_market_cap / p.opened_market_cap),
+                            COALESCE(t.latest_liquidity_usd, p.amount_usd * (t.latest_market_cap / p.opened_market_cap))
+                        ) - p.amount_usd
                         ELSE 0
                     END
                 ), 0) AS unrealized_pnl,
                 COALESCE(SUM(
                     CASE
                         WHEN p.status = 'OPEN' AND t.latest_market_cap IS NOT NULL AND p.opened_market_cap > 0
-                        THEN p.amount_usd * (t.latest_market_cap / p.opened_market_cap)
+                        THEN MIN(
+                            p.amount_usd * (t.latest_market_cap / p.opened_market_cap),
+                            COALESCE(t.latest_liquidity_usd, p.amount_usd * (t.latest_market_cap / p.opened_market_cap))
+                        )
                         ELSE 0
                     END
                 ), 0) AS current_open_value
@@ -471,14 +486,14 @@ class Repository:
         row = self.connection.execute("SELECT COUNT(*) AS count FROM market_cap_history").fetchone()
         return int(row["count"])
 
-    def latest_history_for_tokens(self, token_addresses: Iterable[str]) -> dict[str, float | None]:
+    def latest_snapshots_for_tokens(self, token_addresses: Iterable[str]) -> dict[str, LatestSnapshot]:
         addresses = list(token_addresses)
         if not addresses:
             return {}
         placeholders = ",".join("?" for _ in addresses)
         rows = self.connection.execute(
             f"""
-            SELECT token_address, market_cap
+            SELECT token_address, market_cap, liquidity_usd
             FROM market_cap_history
             WHERE (token_address, observed_at) IN (
                 SELECT token_address, MAX(observed_at)
@@ -489,4 +504,11 @@ class Repository:
             """,
             addresses,
         ).fetchall()
-        return {row["token_address"]: row["market_cap"] for row in rows}
+        return {
+            row["token_address"]: LatestSnapshot(
+                token_address=row["token_address"],
+                market_cap=row["market_cap"],
+                liquidity_usd=row["liquidity_usd"],
+            )
+            for row in rows
+        }

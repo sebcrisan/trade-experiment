@@ -1295,6 +1295,7 @@ def _trader_payload_from_repository(repository: Repository, trader_name: str) ->
 
 def _position_with_live_values(item: dict[str, object]) -> dict[str, object]:
     latest_market_cap = item.get("latest_market_cap")
+    latest_liquidity_usd = item.get("latest_liquidity_usd")
     opened_market_cap = item.get("opened_market_cap")
     amount_usd = float(item.get("amount_usd") or 0.0)
     current_value = amount_usd
@@ -1302,6 +1303,8 @@ def _position_with_live_values(item: dict[str, object]) -> dict[str, object]:
     if latest_market_cap and opened_market_cap:
         multiple = float(latest_market_cap) / float(opened_market_cap)
         current_value = amount_usd * multiple
+        if latest_liquidity_usd is not None:
+            current_value = min(current_value, max(float(latest_liquidity_usd), 0.0))
         pnl = current_value - amount_usd
     item["current_value"] = current_value
     item["unrealized_pnl"] = pnl

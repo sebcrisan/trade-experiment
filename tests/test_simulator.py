@@ -11,6 +11,7 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from crypto_sim.repository import Repository
+from crypto_sim.dashboard import _position_with_live_values
 from crypto_sim.simulator import evaluate_traders
 
 
@@ -210,6 +211,68 @@ class SimulatorTests(unittest.TestCase):
         }
         self.assertEqual(closed_map["Direct_1.5x"], (5.0, "max_age_exit"))
         self.assertEqual(closed_map["Direct_2.0x"], (5.0, "max_age_exit"))
+
+    def test_exit_proceeds_are_capped_by_available_liquidity(self) -> None:
+        repository = _repository()
+        repository.connection.execute(
+            """
+            INSERT INTO tokens (
+                token_address, chain_id, first_seen_at, last_seen_at, latest_market_cap, latest_liquidity_usd, latest_checked_at
+            ) VALUES ('token4', 'solana', 1000, 1000, 20000, 5000, 1000)
+            """
+        )
+        repository.connection.execute(
+            """
+            INSERT INTO market_cap_history (
+                token_address, observed_at, market_cap, price_usd, liquidity_usd, volume_h24
+            ) VALUES ('token4', 1000, 20000, NULL, 5000, NULL)
+            """
+        )
+
+        states = repository.token_states()
+        evaluate_traders(repository, states, observed_at=1000, position_size_usd=10.0, max_token_age_seconds=86400)
+
+        repository.connection.execute(
+            "UPDATE tokens SET latest_market_cap = 1000000, latest_liquidity_usd = 1, latest_checked_at = 1100 WHERE token_address = 'token4'"
+        )
+        repository.connection.execute(
+            """
+            INSERT INTO market_cap_history (
+                token_address, observed_at, market_cap, price_usd, liquidity_usd, volume_h24
+            ) VALUES ('token4', 1100, 1000000, NULL, 1, NULL)
+            """
+        )
+
+        states = repository.token_states()
+        evaluate_traders(repository, states, observed_at=1100, position_size_usd=10.0, max_token_age_seconds=86400)
+
+        closed = repository.connection.execute(
+            """
+            SELECT trader_name, proceeds_usd, pnl_usd
+            FROM trader_positions
+            WHERE token_address = 'token4' AND status = 'CLOSED'
+            ORDER BY trader_name
+            """
+        ).fetchall()
+        closed_map = {
+            row["trader_name"]: (row["proceeds_usd"], row["pnl_usd"])
+            for row in closed
+        }
+        self.assertEqual(closed_map["Direct_1.5x"], (1.0, -9.0))
+        self.assertEqual(closed_map["Direct_2.0x"], (1.0, -9.0))
+
+    def test_unrealized_value_is_capped_by_live_liquidity(self) -> None:
+        item = _position_with_live_values(
+            {
+                "opened_market_cap": 20_000.0,
+                "latest_market_cap": 1_000_000.0,
+                "latest_liquidity_usd": 3.0,
+                "amount_usd": 10.0,
+            }
+        )
+
+        self.assertEqual(item["current_value"], 3.0)
+        self.assertEqual(item["unrealized_pnl"], -7.0)
 
 
 if __name__ == "__main__":

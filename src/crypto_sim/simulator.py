@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from crypto_sim.repository import Repository, TokenState
+from crypto_sim.repository import LatestSnapshot, Repository, TokenState
 
 
 @dataclass(frozen=True)
@@ -83,10 +83,11 @@ def evaluate_traders(
     position_size_usd: float,
     max_token_age_seconds: int,
 ) -> None:
-    history_caps = repository.latest_history_for_tokens(token_states.keys())
+    latest_snapshots = repository.latest_snapshots_for_tokens(token_states.keys())
     for config in TRADERS:
         for token_address in token_states:
-            market_cap = history_caps.get(token_address)
+            snapshot = latest_snapshots.get(token_address)
+            market_cap = snapshot.market_cap if snapshot is not None else None
             if market_cap is None or market_cap <= 0:
                 continue
             if repository.has_ever_position(config.name, token_address):
@@ -104,7 +105,8 @@ def evaluate_traders(
         state = token_states.get(position.token_address)
         if state is None:
             continue
-        current_market_cap = history_caps.get(position.token_address)
+        snapshot = latest_snapshots.get(position.token_address)
+        current_market_cap = snapshot.market_cap if snapshot is not None else None
         if current_market_cap is None or current_market_cap <= 0:
             continue
         trader = _trader_config(position.trader_name)
@@ -112,7 +114,7 @@ def evaluate_traders(
         multiple = current_market_cap / position.opened_market_cap
 
         if multiple >= trader.sell_multiple:
-            proceeds = position.amount_usd * multiple
+            proceeds = _position_value(position.amount_usd, position.opened_market_cap, snapshot)
             repository.close_position(
                 position_id=position.id,
                 closed_at=observed_at,
@@ -122,7 +124,7 @@ def evaluate_traders(
                 close_reason=f"target_{trader.sell_multiple:.2f}x",
             )
         elif age_seconds >= max_token_age_seconds:
-            proceeds = position.amount_usd * multiple
+            proceeds = _position_value(position.amount_usd, position.opened_market_cap, snapshot)
             repository.close_position(
                 position_id=position.id,
                 closed_at=observed_at,
@@ -131,6 +133,15 @@ def evaluate_traders(
                 pnl_usd=proceeds - position.amount_usd,
                 close_reason="max_age_exit",
             )
+
+
+def _position_value(amount_usd: float, opened_market_cap: float, snapshot: LatestSnapshot | None) -> float:
+    if snapshot is None or snapshot.market_cap is None or opened_market_cap <= 0:
+        return amount_usd
+    current_value = amount_usd * (snapshot.market_cap / opened_market_cap)
+    if snapshot.liquidity_usd is None:
+        return current_value
+    return min(current_value, max(float(snapshot.liquidity_usd), 0.0))
 
 
 def _trader_config(trader_name: str) -> TraderConfig:

@@ -21,7 +21,7 @@ Dexscreener does not expose a documented "newest Solana pairs" endpoint. This pr
 - `TraderC`: buy on first observation with market cap >= 20k, sell at 2.0x
 - `TraderD`: once a token has been observed at >= 20k, buy on first observation with market cap >= 40k, sell at 2.0x
 
-Each buy is simulated as a `$10` position. Position value scales with market-cap ratio from entry to exit.
+Each buy is simulated as a `$10` position. Position value scales with market-cap ratio from entry to exit, but the realizable value is capped by the latest observed USD liquidity so liquidity rugs do not create fake profits.
 
 ## Usage
 
