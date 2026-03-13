@@ -21,17 +21,21 @@ HTML = """<!doctype html>
   <title>Crypto Sim Dashboard</title>
   <style>
     :root {
-      --bg: #09111a;
-      --bg-2: #0e1a27;
-      --panel: rgba(11, 19, 30, 0.86);
-      --panel-strong: rgba(16, 27, 40, 0.92);
-      --border: rgba(120, 165, 210, 0.18);
-      --text: #eef4fb;
-      --muted: #89a1bb;
-      --accent: #3dd6b6;
-      --accent-2: #66c7ff;
-      --danger: #ff6f7d;
-      --glow: rgba(102, 199, 255, 0.12);
+      --bg: #07111f;
+      --panel: #0f1a2b;
+      --panel-soft: #111f34;
+      --border: rgba(148, 163, 184, 0.16);
+      --border-strong: rgba(148, 163, 184, 0.28);
+      --text: #e5edf8;
+      --muted: #93a4bc;
+      --muted-2: #6f839f;
+      --accent: #67b3ff;
+      --accent-soft: rgba(103, 179, 255, 0.14);
+      --success: #35d0a1;
+      --danger: #ff6b7c;
+      --shadow: 0 16px 36px rgba(2, 8, 23, 0.34);
+      --shadow-soft: 0 8px 24px rgba(2, 8, 23, 0.22);
+      --radius: 18px;
     }
     * { box-sizing: border-box; }
     body {
@@ -39,160 +43,155 @@ HTML = """<!doctype html>
       font-family: "Aptos", "Segoe UI Variable", "Segoe UI", sans-serif;
       color: var(--text);
       background:
-        radial-gradient(circle at top left, rgba(61, 214, 182, 0.16), transparent 30%),
-        radial-gradient(circle at top right, rgba(102, 199, 255, 0.16), transparent 24%),
-        linear-gradient(180deg, var(--bg) 0%, #050a10 100%);
+        radial-gradient(circle at top left, rgba(103, 179, 255, 0.12), transparent 22%),
+        radial-gradient(circle at top right, rgba(53, 208, 161, 0.08), transparent 18%),
+        linear-gradient(180deg, #06101d 0%, var(--bg) 100%);
     }
     .wrap {
-      width: min(1320px, calc(100% - 28px));
-      margin: 20px auto 36px;
+      width: min(1360px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 28px 0 40px;
     }
-    .hero {
-      display: grid;
-      grid-template-columns: 1.2fr 0.8fr;
-      gap: 18px;
-      margin-bottom: 18px;
-    }
-    .hero-main, .hero-side, .card, .panel, .trader-card {
-      background: linear-gradient(180deg, rgba(255,255,255,0.03), transparent 26%), var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 22px;
-      box-shadow: 0 18px 50px rgba(0,0,0,0.22);
-      backdrop-filter: blur(10px);
-    }
-    .hero-main {
-      padding: 22px;
-      min-height: 156px;
-    }
-    .eyebrow {
-      color: var(--accent-2);
-      text-transform: uppercase;
-      letter-spacing: 0.16em;
-      font-size: 12px;
-    }
-    h1 {
-      margin: 10px 0 0;
-      font-size: clamp(36px, 5.6vw, 64px);
-      line-height: 0.96;
-      letter-spacing: -0.05em;
-    }
-    .sub {
-      color: var(--muted);
-      margin-top: 10px;
-      font-size: 13px;
-      max-width: 62ch;
-    }
-    .hero-side {
-      padding: 18px;
+    .topbar {
       display: flex;
-      flex-direction: column;
       justify-content: space-between;
+      align-items: end;
       gap: 16px;
+      margin-bottom: 22px;
     }
-    .timestamp {
-      color: var(--muted);
-      font-size: 12px;
-      text-align: right;
-    }
-    .hero-stats {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-    }
-    .hero-stat {
-      padding: 14px;
-      border-radius: 16px;
-      background: rgba(255,255,255,0.02);
-      border: 1px solid rgba(120, 165, 210, 0.12);
-    }
-    .hero-stat .label,
-    .card .label,
-    .trader-meta .label {
-      color: var(--muted);
+    .page-kicker {
+      color: var(--accent);
       text-transform: uppercase;
       letter-spacing: 0.12em;
       font-size: 11px;
-    }
-    .hero-stat .value {
-      margin-top: 8px;
-      font-size: 24px;
       font-weight: 700;
+    }
+    .page-title {
+      margin: 6px 0 0;
+      font-size: clamp(28px, 4vw, 40px);
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+    }
+    .page-copy {
+      margin: 10px 0 0;
+      color: var(--muted);
+      max-width: 70ch;
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    .updated-at {
+      flex-shrink: 0;
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
     }
     .summary-grid {
       display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 12px;
-      margin-bottom: 14px;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 14px;
+      margin-bottom: 24px;
+    }
+    .card,
+    .panel,
+    .trader-card,
+    .strategy-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-soft);
     }
     .card {
-      padding: 14px;
+      padding: 18px;
+      min-width: 0;
     }
-    .card .value {
-      margin-top: 8px;
-      font-size: 24px;
+    .metric-label,
+    .meta-label,
+    th {
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 11px;
       font-weight: 700;
     }
-    .card .foot {
+    .metric-value {
+      margin-top: 10px;
+      font-size: clamp(24px, 3vw, 32px);
+      line-height: 1.05;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      overflow-wrap: anywhere;
+    }
+    .metric-foot {
       margin-top: 8px;
       color: var(--muted);
-      font-size: 12px;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+    .section {
+      margin-bottom: 24px;
     }
     .section-head {
       display: flex;
       justify-content: space-between;
-      align-items: center;
-      gap: 12px;
-      margin-bottom: 12px;
+      align-items: end;
+      gap: 14px;
+      margin-bottom: 14px;
     }
     .section-title {
       margin: 0;
       font-size: 20px;
-      line-height: 1;
+      line-height: 1.2;
+      letter-spacing: -0.02em;
     }
     .section-copy {
+      margin-top: 4px;
       color: var(--muted);
-      font-size: 12px;
-    }
-    .trader-grid {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 14px;
-      margin-bottom: 18px;
+      font-size: 13px;
+      line-height: 1.5;
     }
     .leaderboard-grid {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .panel {
+      padding: 18px;
+      min-width: 0;
+    }
+    .panel-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: start;
       gap: 14px;
       margin-bottom: 16px;
     }
-    .leaderboard-panel {
-      padding: 16px;
-      background: linear-gradient(180deg, rgba(255,255,255,0.03), transparent 26%), var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 22px;
-      box-shadow: 0 18px 50px rgba(0,0,0,0.18);
-    }
-    .leaderboard-head {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 14px;
-      margin-bottom: 12px;
-    }
-    .leaderboard-title {
+    .panel-head h3,
+    .panel-head h2 {
       margin: 0;
       font-size: 18px;
+      letter-spacing: -0.02em;
+    }
+    .panel-kicker {
+      color: var(--muted-2);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+    .trader-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 14px;
     }
     .trader-card {
-      padding: 14px;
+      padding: 16px;
       color: inherit;
       text-decoration: none;
-      transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+      min-width: 0;
+      transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
     }
     .trader-card:hover {
       transform: translateY(-2px);
-      border-color: rgba(102, 199, 255, 0.4);
-      box-shadow: 0 22px 50px rgba(0,0,0,0.28), 0 0 0 1px var(--glow) inset;
+      border-color: var(--border-strong);
+      box-shadow: var(--shadow);
     }
     .trader-top {
       display: flex;
@@ -200,284 +199,382 @@ HTML = """<!doctype html>
       align-items: start;
       gap: 12px;
     }
+    .trader-heading {
+      min-width: 0;
+    }
     .trader-name {
       font-size: 18px;
-      line-height: 1;
+      line-height: 1.1;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      overflow-wrap: normal;
+      word-break: normal;
+    }
+    .trader-family {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 13px;
     }
     .trader-pill {
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 6px 10px;
       border-radius: 999px;
       border: 1px solid var(--border);
-      padding: 4px 9px;
-      font-size: 11px;
+      background: var(--panel-soft);
       color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.08em;
+      white-space: nowrap;
+    }
+    .trader-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+    .info-menu {
+      position: relative;
+      flex-shrink: 0;
+    }
+    .info-menu summary {
+      list-style: none;
+      width: 26px;
+      height: 26px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: var(--panel-soft);
+      color: var(--accent);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 700;
+      user-select: none;
+    }
+    .info-menu summary::-webkit-details-marker {
+      display: none;
+    }
+    .tooltip {
+      position: absolute;
+      top: calc(100% + 10px);
+      left: 50%;
+      z-index: 4;
+      width: min(240px, 72vw);
+      padding: 12px 14px;
+      border-radius: 12px;
+      border: 1px solid var(--border-strong);
+      background: #13233a;
+      color: var(--text);
+      box-shadow: var(--shadow);
+      font-size: 12px;
+      line-height: 1.55;
+      opacity: 0;
+      pointer-events: none;
+      transform: translate(-50%, -4px);
+      transition: opacity 140ms ease, transform 140ms ease;
+    }
+    .info-menu:hover .tooltip,
+    .info-menu:focus-within .tooltip,
+    .info-menu[open] .tooltip {
+      opacity: 1;
+      pointer-events: auto;
+      transform: translate(-50%, 0);
     }
     .trader-net {
-      margin-top: 12px;
-      font-size: 24px;
+      margin-top: 18px;
+      font-size: clamp(28px, 3vw, 36px);
+      line-height: 1;
       font-weight: 700;
+      letter-spacing: -0.04em;
+      overflow-wrap: anywhere;
     }
     .trader-meta {
       display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 8px 12px;
-      margin-top: 12px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
     }
-    .trader-meta .meta-value {
-      margin-top: 4px;
-      font-size: 13px;
-      font-weight: 600;
-    }
-    .panels {
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 14px;
+    .meta-value {
+      margin-top: 6px;
+      font-size: 15px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
     }
     .strategy-grid {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 14px;
-      margin-bottom: 14px;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
     }
     .strategy-card {
-      padding: 14px;
-      background: linear-gradient(180deg, rgba(255,255,255,0.03), transparent 26%), var(--panel-strong);
-      border: 1px solid var(--border);
-      border-radius: 20px;
-      box-shadow: 0 18px 50px rgba(0,0,0,0.18);
+      padding: 18px;
+      min-width: 0;
+    }
+    .strategy-family {
+      color: var(--accent);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 11px;
+      font-weight: 700;
     }
     .strategy-card h3 {
-      margin: 10px 0 8px;
-      font-size: 18px;
+      margin: 8px 0 8px;
+      font-size: 20px;
+      letter-spacing: -0.02em;
     }
     .strategy-card p {
       margin: 0;
       color: var(--muted);
-      font-size: 12px;
-      line-height: 1.5;
+      font-size: 14px;
+      line-height: 1.6;
     }
     .strategy-tags {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
-      margin-top: 14px;
+      margin-top: 16px;
     }
     .tag {
-      display: inline-block;
-      padding: 5px 9px;
-      border-radius: 999px;
-      border: 1px solid rgba(102, 199, 255, 0.16);
-      background: rgba(102, 199, 255, 0.08);
-      font-size: 11px;
-      color: #b9def7;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-    }
-    .panel {
-      overflow: hidden;
-    }
-    .panel-head {
-      display: flex;
-      justify-content: space-between;
+      display: inline-flex;
       align-items: center;
-      gap: 12px;
-      padding: 14px 16px 10px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      border: 1px solid rgba(37, 99, 235, 0.12);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      white-space: nowrap;
     }
-    .panel-head h2 {
-      margin: 0;
-      font-size: 18px;
+    .table-wrap {
+      overflow-x: auto;
+      margin: 0 -18px -18px;
+      padding: 0 18px 18px;
+      scrollbar-width: thin;
     }
     table {
       width: 100%;
-      border-collapse: collapse;
+      min-width: 760px;
+      border-collapse: separate;
+      border-spacing: 0;
+      table-layout: fixed;
     }
     th, td {
-      padding: 11px 16px;
-      border-top: 1px solid rgba(120, 165, 210, 0.12);
+      padding: 14px 12px;
+      border-top: 1px solid var(--border);
       text-align: left;
       vertical-align: top;
-      font-size: 12px;
+      font-size: 13px;
+      overflow-wrap: anywhere;
     }
     th {
-      color: var(--muted);
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
+      background: var(--panel);
     }
-    tr:hover td {
-      background: rgba(255,255,255,0.015);
+    tbody tr:hover td {
+      background: rgba(255, 255, 255, 0.02);
+    }
+    .token-primary {
+      font-size: 14px;
+      font-weight: 700;
+      line-height: 1.4;
     }
     .mono {
       font-family: Consolas, monospace;
       font-size: 12px;
-    }
-    .muted { color: var(--muted); }
-    .pos { color: var(--accent); }
-    .neg { color: var(--danger); }
-    .pill {
-      display: inline-block;
-      padding: 4px 10px;
-      border-radius: 999px;
-      background: rgba(102, 199, 255, 0.08);
-      border: 1px solid rgba(102, 199, 255, 0.14);
-      font-size: 12px;
-    }
-    .token-name {
-      font-size: 13px;
-      font-weight: 600;
+      color: var(--muted);
     }
     .token-links {
       display: flex;
-      gap: 8px;
-      margin-top: 4px;
       flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 6px;
     }
-    .token-links a,
     a {
-      color: #a7ddff;
+      color: var(--accent);
       text-decoration: none;
     }
-    .footer {
+    a:hover {
+      text-decoration: underline;
+    }
+    .pos { color: var(--success); }
+    .neg { color: var(--danger); }
+    .empty {
+      padding: 18px;
       color: var(--muted);
-      font-size: 11px;
-      margin-top: 10px;
-      text-align: right;
+      border: 1px dashed var(--border-strong);
+      border-radius: 14px;
+      background: var(--panel-soft);
+      font-size: 14px;
+    }
+    @media (max-width: 1400px) {
+      .leaderboard-grid {
+        grid-template-columns: 1fr;
+      }
     }
     @media (max-width: 1180px) {
-      .hero, .summary-grid, .trader-grid, .strategy-grid, .leaderboard-grid { grid-template-columns: 1fr 1fr; }
+      .trader-grid {
+        grid-template-columns: 1fr;
+      }
     }
     @media (max-width: 820px) {
-      .hero, .summary-grid, .trader-grid, .strategy-grid, .hero-stats, .leaderboard-grid { grid-template-columns: 1fr; }
-      .timestamp { text-align: left; }
-      .wrap { width: min(100%, calc(100% - 20px)); }
+      .wrap {
+        width: min(100%, calc(100% - 20px));
+        padding-top: 22px;
+      }
+      .topbar,
+      .section-head,
+      .panel-head {
+        flex-direction: column;
+        align-items: start;
+      }
+      .updated-at,
+      .panel-kicker {
+        white-space: normal;
+      }
+      .summary-grid,
+      .leaderboard-grid,
+      .strategy-grid,
+      .trader-meta {
+        grid-template-columns: 1fr;
+      }
+      .card,
+      .panel,
+      .trader-card,
+      .strategy-card {
+        border-radius: 16px;
+      }
+      table {
+        min-width: 640px;
+      }
+      .tooltip {
+        left: 0;
+        width: min(220px, 78vw);
+        transform: translateY(-4px);
+      }
+      .info-menu:hover .tooltip,
+      .info-menu:focus-within .tooltip,
+      .info-menu[open] .tooltip {
+        transform: translateY(0);
+      }
     }
   </style>
 </head>
 <body>
   <div class="wrap">
-    <section class="hero">
-      <div class="hero-main">
-        <div class="eyebrow">Solana Paper-Trading Simulator</div>
-        <h1>Crypto Sim</h1>
-        <div class="sub">Track newly created Solana pairs and rank competing trader strategies by realized and unrealized performance.</div>
+    <header class="topbar">
+      <div>
+        <div class="page-kicker">Solana Strategy Dashboard</div>
+        <h1 class="page-title">Trader performance and token flow</h1>
+        <p class="page-copy">Compare the strongest and weakest simulated entry ladders, review how each strategy actually works, and inspect which tokens produced the largest combined results.</p>
       </div>
-      <div class="hero-side">
-        <div class="timestamp" id="updated">Loading...</div>
-        <div class="hero-stats">
-          <div class="hero-stat">
-            <div class="label">Best Trader</div>
-            <div class="value" id="hero-invested">-</div>
-          </div>
-          <div class="hero-stat">
-            <div class="label">Worst Trader</div>
-            <div class="value" id="hero-value">-</div>
-          </div>
-        </div>
-      </div>
+      <div class="updated-at" id="updated">Loading...</div>
+    </header>
+
+    <section class="section">
+      <div class="summary-grid" id="summary"></div>
     </section>
 
-    <div class="summary-grid" id="summary"></div>
-
-    <section>
+    <section class="section">
       <div class="section-head">
         <div>
-          <h2 class="section-title">Trader Leaderboards</h2>
-          <div class="section-copy">The goal is to find the strongest individual strategy, not to aggregate the field.</div>
+          <h2 class="section-title">Trader leaderboards</h2>
+          <div class="section-copy">Net PnL ranks each strategy after combining realized and still-open position performance.</div>
         </div>
       </div>
       <div class="leaderboard-grid">
-        <section class="leaderboard-panel">
-          <div class="leaderboard-head">
-            <h3 class="leaderboard-title">Top 3 Best Performers</h3>
-            <div class="section-copy">Highest net PnL</div>
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h3>Top 3 best performers</h3>
+              <div class="section-copy">Highest net PnL across all strategy variants.</div>
+            </div>
+            <div class="panel-kicker">Best net PnL</div>
           </div>
           <div class="trader-grid" id="best-traders"></div>
         </section>
-        <section class="leaderboard-panel">
-          <div class="leaderboard-head">
-            <h3 class="leaderboard-title">Top 3 Worst Performers</h3>
-            <div class="section-copy">Lowest net PnL</div>
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h3>Top 3 weakest performers</h3>
+              <div class="section-copy">Lowest net PnL across all strategy variants.</div>
+            </div>
+            <div class="panel-kicker">Lowest net PnL</div>
           </div>
           <div class="trader-grid" id="worst-traders"></div>
         </section>
       </div>
     </section>
 
-    <section>
+    <section class="section">
       <div class="section-head">
         <div>
-          <h2 class="section-title">Strategy Guide</h2>
-          <div class="section-copy">A plain-language summary of how each trader enters and exits positions.</div>
+          <h2 class="section-title">Strategy guide</h2>
+          <div class="section-copy">Two strategy families drive all generated traders. The differences below match the actual simulator rules.</div>
         </div>
       </div>
       <div class="strategy-grid" id="strategies"></div>
     </section>
 
-    <div class="panels">
-      <section class="panel">
-        <div class="panel-head">
-          <h2>Top Performing Tokens</h2>
-          <div class="section-copy">Tokens ranked by combined realized and unrealized trader PnL.</div>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Token</th>
-              <th>Positions</th>
-              <th>Total Invested</th>
-              <th>Realized PnL</th>
-              <th>Unrealized PnL</th>
-              <th>Net PnL</th>
-            </tr>
-          </thead>
-          <tbody id="top-tokens"></tbody>
-        </table>
-      </section>
+    <section class="section">
+      <div class="leaderboard-grid">
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Top 5 performing tokens</h2>
+              <div class="section-copy">Tokens ranked by combined realized and unrealized PnL from all traders.</div>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 32%;">Token</th>
+                  <th>Positions</th>
+                  <th>Total Invested</th>
+                  <th>Realized PnL</th>
+                  <th>Unrealized PnL</th>
+                  <th>Net PnL</th>
+                </tr>
+              </thead>
+              <tbody id="top-tokens"></tbody>
+            </table>
+          </div>
+        </section>
 
-      <section class="panel">
-        <div class="panel-head">
-          <h2>Open Positions</h2>
-          <div class="section-copy">Live mark-to-market view of every active position.</div>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Trader</th>
-              <th>Token</th>
-              <th>Entry Mcap</th>
-              <th>Current Mcap</th>
-              <th>Invested</th>
-              <th>Current Value</th>
-              <th>Unrealized PnL</th>
-            </tr>
-          </thead>
-          <tbody id="positions"></tbody>
-        </table>
-      </section>
-
-      <section class="panel">
-        <div class="panel-head">
-          <h2>Newest Tokens</h2>
-          <div class="section-copy">Most recently admitted pairs under the current recency filter.</div>
-        </div>
-        <table>
-          <thead>
-            <tr>
-              <th>Token</th>
-              <th>Market Cap</th>
-              <th>Liquidity</th>
-              <th>Volume 24h</th>
-              <th>Price</th>
-              <th>First Seen</th>
-            </tr>
-          </thead>
-          <tbody id="tokens"></tbody>
-        </table>
-      </section>
-    </div>
-
-    <div class="footer">Auto-refreshes every 30 seconds.</div>
+        <section class="panel">
+          <div class="panel-head">
+            <div>
+              <h2>Newest tokens</h2>
+              <div class="section-copy">Recently admitted pairs under the current recency filter.</div>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th style="width: 32%;">Token</th>
+                  <th>Market Cap</th>
+                  <th>Liquidity</th>
+                  <th>Volume 24h</th>
+                  <th>Price</th>
+                  <th>First Seen</th>
+                </tr>
+              </thead>
+              <tbody id="tokens"></tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+    </section>
   </div>
 
   <script>
@@ -490,13 +587,63 @@ HTML = """<!doctype html>
       }).format(value);
     }
 
+    function fmtCount(value) {
+      if (value === null || value === undefined) return "-";
+      return new Intl.NumberFormat("en-US").format(value);
+    }
+
     function fmtDate(value) {
       if (!value) return "-";
       return new Date(value * 1000).toLocaleString();
     }
 
     function metricCard(label, value, foot = "") {
-      return `<div class="card"><div class="label">${label}</div><div class="value">${value}</div>${foot ? `<div class="foot">${foot}</div>` : ""}</div>`;
+      return `<div class="card"><div class="metric-label">${label}</div><div class="metric-value">${value}</div>${foot ? `<div class="metric-foot">${foot}</div>` : ""}</div>`;
+    }
+
+    function renderTraderCards(rows) {
+      if (!rows.length) {
+        return `<div class="empty">No trader data yet.</div>`;
+      }
+      return rows.map((row) => `
+        <div class="trader-card">
+          <div class="trader-top">
+            <div class="trader-heading">
+              <div class="trader-name">${row.strategy.label}</div>
+              <div class="trader-family">${row.strategy.family}</div>
+            </div>
+            <div class="trader-actions">
+              <details class="info-menu">
+                <summary aria-label="Show trader description">?</summary>
+                <div class="tooltip">${row.strategy.description}</div>
+              </details>
+              <div class="trader-pill">${row.open_positions_count} open</div>
+            </div>
+          </div>
+          <div class="trader-net ${row.net_pnl >= 0 ? "pos" : "neg"}">${fmtUsd(row.net_pnl)}</div>
+          <div class="trader-meta">
+            <div>
+              <div class="meta-label">Invested</div>
+              <div class="meta-value">${fmtUsd(row.total_invested)}</div>
+            </div>
+            <div>
+              <div class="meta-label">Open Value</div>
+              <div class="meta-value">${fmtUsd(row.current_open_value)}</div>
+            </div>
+            <div>
+              <div class="meta-label">Realized</div>
+              <div class="meta-value ${row.realized_pnl >= 0 ? "pos" : "neg"}">${fmtUsd(row.realized_pnl)}</div>
+            </div>
+            <div>
+              <div class="meta-label">Unrealized</div>
+              <div class="meta-value ${row.unrealized_pnl >= 0 ? "pos" : "neg"}">${fmtUsd(row.unrealized_pnl)}</div>
+            </div>
+          </div>
+          <div class="token-links" style="margin-top: 16px;">
+            <a href="/trader/${row.trader_name}">Trader details</a>
+          </div>
+        </div>
+      `).join("");
     }
 
     async function load() {
@@ -504,66 +651,27 @@ HTML = """<!doctype html>
       const data = await response.json();
 
       document.getElementById("updated").textContent = `Updated ${new Date().toLocaleString()}`;
-      document.getElementById("hero-invested").textContent = fmtUsd(data.summary.open_capital);
-      document.getElementById("hero-value").textContent = fmtUsd(data.summary.current_open_value);
 
       document.getElementById("summary").innerHTML = [
-        metricCard("Tracked Tokens", data.summary.tokens, "Pairs admitted by the current recency filter"),
-        metricCard("Snapshots", data.summary.snapshots, "Historical observations stored locally"),
-        metricCard("Open Positions", data.summary.open_positions, "Active positions across all traders"),
-        metricCard("Top Token", data.summary.top_token_symbol || "-", "Best token by combined trader PnL"),
-        metricCard("Best Net PnL", fmtUsd(data.summary.best_trader_net_pnl), "Current leading trader result"),
-        metricCard("Worst Net PnL", fmtUsd(data.summary.worst_trader_net_pnl), "Current weakest trader result"),
-        metricCard("Top Token PnL", fmtUsd(data.summary.top_token_net_pnl), "Leaderboard token net result"),
-        metricCard("Refresh Interval", "30s", "Dashboard polling interval")
+        metricCard("Strategies", fmtCount(data.summary.strategy_count), "Total generated trader variants currently ranked."),
+        metricCard("Families", fmtCount(data.summary.family_count), "Independent entry-rule families in the simulator."),
+        metricCard("Closed Trades", fmtCount(data.summary.closed_trades), "Positions that have already been fully exited."),
+        metricCard("Profitable Strategies", fmtCount(data.summary.profitable_strategies), "Strategies with positive current net PnL.")
       ].join("");
-
-      function renderTraderCards(rows) {
-        return rows.length ? rows.map((row) => `
-          <a class="trader-card" href="/trader/${row.trader_name}">
-            <div class="trader-top">
-              <div>
-                <div class="trader-name">${row.strategy.label}</div>
-                <div class="muted">${row.strategy.family}</div>
-              </div>
-              <div class="trader-pill">${row.open_positions_count} open</div>
-            </div>
-            <div class="trader-net ${row.net_pnl >= 0 ? "pos" : "neg"}">${fmtUsd(row.net_pnl)}</div>
-            <div class="trader-meta">
-              <div>
-                <div class="label">Total Invested</div>
-                <div class="meta-value">${fmtUsd(row.total_invested)}</div>
-              </div>
-              <div>
-                <div class="label">Current Value</div>
-                <div class="meta-value">${fmtUsd(row.current_open_value)}</div>
-              </div>
-              <div>
-                <div class="label">Realized</div>
-                <div class="meta-value ${row.realized_pnl >= 0 ? "pos" : "neg"}">${fmtUsd(row.realized_pnl)}</div>
-              </div>
-              <div>
-                <div class="label">Unrealized</div>
-                <div class="meta-value ${row.unrealized_pnl >= 0 ? "pos" : "neg"}">${fmtUsd(row.unrealized_pnl)}</div>
-              </div>
-            </div>
-          </a>
-        `).join("") : `<div class="card">No trader data yet.</div>`;
-      }
 
       document.getElementById("best-traders").innerHTML = renderTraderCards(data.best_traders);
       document.getElementById("worst-traders").innerHTML = renderTraderCards(data.worst_traders);
 
       document.getElementById("strategies").innerHTML = data.family_guides.map((row) => `
         <div class="strategy-card">
-          <div class="eyebrow">${row.family}</div>
-          <h3>${row.headline} Ladder</h3>
+          <div class="strategy-family">${row.family}</div>
+          <h3>${row.headline}</h3>
           <p>${row.description}</p>
           <div class="strategy-tags">
             <span class="tag">Entry ${fmtUsd(row.entry_market_cap, 0)}</span>
-            <span class="tag">${row.requires_prior_threshold ? `Needs prior ${fmtUsd(row.requires_prior_threshold, 0)}` : "No prior threshold"}</span>
+            <span class="tag">${row.requires_prior_threshold ? `Baseline ${fmtUsd(row.requires_prior_threshold, 0)}` : "No baseline requirement"}</span>
             <span class="tag">Targets ${row.min_sell_multiple.toFixed(1)}x to ${row.max_sell_multiple.toFixed(1)}x</span>
-            <span class="tag">${row.trader_count} traders</span>
+            <span class="tag">${fmtCount(row.trader_count)} variants</span>
           </div>
         </div>
       `).join("");
@@ -571,14 +679,14 @@ HTML = """<!doctype html>
       document.getElementById("top-tokens").innerHTML = data.top_tokens.length ? data.top_tokens.map((row) => `
         <tr>
           <td>
-            <div class="token-name">${row.symbol || "-"}</div>
+            <div class="token-primary">${row.symbol || "-"}</div>
             <div class="mono">${row.token_address.slice(0, 14)}...</div>
             <div class="token-links">
               <a href="/token/${row.token_address}">Token detail</a>
               ${row.pair_url ? `<a href="${row.pair_url}" target="_blank" rel="noreferrer">Dexscreener</a>` : ""}
             </div>
           </td>
-          <td>${row.total_positions}</td>
+          <td>${fmtCount(row.total_positions)}</td>
           <td>${fmtUsd(row.total_invested)}</td>
           <td class="${row.realized_pnl >= 0 ? "pos" : "neg"}">${fmtUsd(row.realized_pnl)}</td>
           <td class="${row.unrealized_pnl >= 0 ? "pos" : "neg"}">${fmtUsd(row.unrealized_pnl)}</td>
@@ -586,32 +694,10 @@ HTML = """<!doctype html>
         </tr>
       `).join("") : `<tr><td colspan="6">No token performance data yet.</td></tr>`;
 
-      document.getElementById("hero-invested").textContent = data.best_traders[0] ? data.best_traders[0].strategy.label : "-";
-      document.getElementById("hero-value").textContent = data.worst_traders[0] ? data.worst_traders[0].strategy.label : "-";
-
-      document.getElementById("positions").innerHTML = data.open_positions.length ? data.open_positions.map((row) => `
-        <tr>
-          <td><a href="/trader/${row.trader_name}"><span class="pill">${row.trader_name}</span></a></td>
-          <td>
-            <div class="token-name">${row.symbol || "-"}</div>
-            <div class="mono">${row.token_address.slice(0, 14)}...</div>
-            <div class="token-links">
-              <a href="/token/${row.token_address}">Token detail</a>
-              ${row.pair_url ? `<a href="${row.pair_url}" target="_blank" rel="noreferrer">Dexscreener</a>` : ""}
-            </div>
-          </td>
-          <td>${fmtUsd(row.opened_market_cap, 0)}</td>
-          <td>${fmtUsd(row.latest_market_cap, 0)}</td>
-          <td>${fmtUsd(row.amount_usd)}</td>
-          <td>${fmtUsd(row.current_value)}</td>
-          <td class="${row.unrealized_pnl >= 0 ? "pos" : "neg"}">${fmtUsd(row.unrealized_pnl)}</td>
-        </tr>
-      `).join("") : `<tr><td colspan="7">No open positions.</td></tr>`;
-
-      document.getElementById("tokens").innerHTML = data.tokens.map((row) => `
+      document.getElementById("tokens").innerHTML = data.tokens.length ? data.tokens.map((row) => `
         <tr>
           <td>
-            <div class="token-name">${row.symbol || "-"}</div>
+            <div class="token-primary">${row.symbol || "-"}</div>
             <div class="mono">${row.token_address.slice(0, 14)}...</div>
             <div class="token-links">
               <a href="/token/${row.token_address}">Details</a>
@@ -624,7 +710,7 @@ HTML = """<!doctype html>
           <td>${fmtUsd(row.latest_price_usd, 8)}</td>
           <td>${fmtDate(row.first_seen_at)}</td>
         </tr>
-      `).join("");
+      `).join("") : `<tr><td colspan="6">No tokens available yet.</td></tr>`;
     }
 
     load();
@@ -633,8 +719,6 @@ HTML = """<!doctype html>
 </body>
 </html>
 """
-
-
 def token_detail_html(token_address: str) -> str:
     escaped = html.escape(token_address)
     return f"""<!doctype html>
@@ -1161,15 +1245,7 @@ def _parse_limit(query: str) -> int:
 def _dashboard_payload(db_path: Path, limit: int) -> dict[str, object]:
     with connect(db_path) as connection:
         repository = Repository(connection)
-        open_positions = []
-        open_capital = 0.0
-        current_open_value = 0.0
-        for row in repository.open_position_report_rows():
-            item = _position_with_live_values(dict(row))
-            open_positions.append(item)
-            open_capital += float(item["amount_usd"] or 0.0)
-            current_open_value += float(item["current_value"] or 0.0)
-        tokens = [_row_to_dict(row) for row in repository.latest_tokens(limit=limit)]
+        tokens = [_row_to_dict(row) for row in repository.latest_tokens(limit=min(limit, 5))]
         traders = []
         for trader_name in repository.trader_names():
             payload = _trader_payload_from_repository(repository, trader_name)
@@ -1182,7 +1258,7 @@ def _dashboard_payload(db_path: Path, limit: int) -> dict[str, object]:
             )
         families = _family_groups(traders)
         top_tokens = []
-        for row in repository.top_token_performance(limit=8):
+        for row in repository.top_token_performance(limit=5):
             item = _row_to_dict(row)
             realized = float(item["realized_pnl"] or 0.0)
             unrealized = float(item["unrealized_pnl"] or 0.0)
@@ -1191,30 +1267,23 @@ def _dashboard_payload(db_path: Path, limit: int) -> dict[str, object]:
         traders_sorted = sorted(traders, key=lambda item: float(item["net_pnl"]), reverse=True)
         best_traders = traders_sorted[:3]
         worst_traders = list(reversed(traders_sorted[-3:])) if traders_sorted else []
-        top_token = top_tokens[0] if top_tokens else None
 
-        closed_pnl = sum(float(row["realized_pnl"]) for row in traders)
+        closed_trades = sum(int(row["total_trades"]) for row in traders)
+        profitable_strategies = sum(1 for row in traders if float(row["net_pnl"]) > 0)
         return {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "summary": {
-                "tokens": repository.total_token_count(),
+                "strategy_count": len(traders),
+                "family_count": len(families),
                 "snapshots": repository.total_snapshot_count(),
-                "open_positions": len(open_positions),
-                "closed_pnl": closed_pnl,
-                "open_capital": open_capital,
-                "current_open_value": current_open_value,
-                "net_open_pnl": current_open_value - open_capital,
-                "best_trader_net_pnl": float(best_traders[0]["net_pnl"]) if best_traders else 0.0,
-                "worst_trader_net_pnl": float(worst_traders[0]["net_pnl"]) if worst_traders else 0.0,
-                "top_token_symbol": top_token["symbol"] if top_token else None,
-                "top_token_net_pnl": float(top_token["net_pnl"]) if top_token else 0.0,
+                "closed_trades": closed_trades,
+                "profitable_strategies": profitable_strategies,
             },
             "traders": traders,
             "families": families,
             "best_traders": best_traders,
             "worst_traders": worst_traders,
             "family_guides": _family_guides(),
-            "open_positions": open_positions,
             "top_tokens": top_tokens,
             "tokens": tokens,
         }
@@ -1363,9 +1432,9 @@ def _family_guides() -> list[dict[str, object]]:
                 "max_sell_multiple": last.sell_multiple,
                 "trader_count": len(configs),
                 "description": (
-                    "Buys immediately once market cap first reaches the entry threshold."
+                    "Enters immediately on the first snapshot at or above 20k market cap, then exits using the selected post-entry multiple."
                     if first.requires_prior_threshold is None
-                    else "Waits for a 20k proof point, then only enters after a later 40k confirmation."
+                    else "Uses the first 20k-plus snapshot as a baseline, enters only after a later 2x confirmation, then exits using the selected post-entry multiple."
                 ),
             }
         )

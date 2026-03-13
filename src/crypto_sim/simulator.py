@@ -31,8 +31,8 @@ def _build_traders() -> tuple[TraderConfig, ...]:
             "buy_market_cap": 20_000.0,
             "requires_prior_threshold": None,
             "description_template": (
-                "Buys immediately when a token is first observed at or above 20k market cap, "
-                "then sells on the first {multiple:.1f}x move."
+                "Enters on the first snapshot at or above 20k market cap. "
+                "After entry, it exits on the first snapshot that reaches {multiple:.1f}x of the entry market cap."
             ),
             "label_template": "Direct {multiple:.1f}x",
             "entry_rule": "threshold",
@@ -43,9 +43,9 @@ def _build_traders() -> tuple[TraderConfig, ...]:
             "buy_market_cap": 20_000.0,
             "requires_prior_threshold": 20_000.0,
             "description_template": (
-                "Waits for the first observed snapshot at or above 20k market cap, then buys only after "
-                "the token later doubles from that observed level. After entry, it sells on the first "
-                "{multiple:.1f}x move."
+                "Uses the first snapshot at or above 20k market cap as a baseline. "
+                "It only enters later, once market cap reaches 2x that baseline, and then exits on the first "
+                "snapshot that reaches {multiple:.1f}x of its actual entry market cap."
             ),
             "label_template": "Confirmed {multiple:.1f}x",
             "entry_rule": "double_from_baseline",
