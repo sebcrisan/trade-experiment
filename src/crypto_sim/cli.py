@@ -55,6 +55,7 @@ def main() -> int:
         return 0
 
     if args.command == "dashboard":
+        initialize_database(args.db_path)
         DashboardServer(args.db_path, host=args.host, port=args.port).serve()
         return 0
 

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from crypto_sim.repository import LatestSnapshot, Repository, TokenState
+from crypto_sim.repository import FirstSnapshot, LatestSnapshot, Repository, TokenState
 
 
 @dataclass(frozen=True)
@@ -17,9 +17,12 @@ class TraderConfig:
     entry_rule: str
 
 
-MAX_TARGET_MARKET_CAP = 989_000.0
-MULTIPLE_STEP = 0.5
-MIN_SELL_MULTIPLE = 1.5
+ENTRY_MARKET_CAP_MIN = 20_000.0
+ENTRY_MARKET_CAP_MAX = 100_000.0
+ENTRY_LIQUIDITY_MIN = 15_000.0
+ENTRY_VOLUME_MIN = 25_000.0
+DIRECT_TARGETS = (3.0, 3.5, 4.0, 4.5)
+CONFIRMED_TARGETS = (1.5, 2.0, 2.5)
 
 
 def _build_traders() -> tuple[TraderConfig, ...]:
@@ -28,34 +31,36 @@ def _build_traders() -> tuple[TraderConfig, ...]:
         {
             "family": "Direct Entry",
             "prefix": "Direct",
-            "buy_market_cap": 20_000.0,
+            "buy_market_cap": ENTRY_MARKET_CAP_MIN,
             "requires_prior_threshold": None,
             "description_template": (
-                "Enters on the first snapshot at or above 20k market cap. "
+                "Enters only for tokens first detected between 20k and 100k market cap with at least 15k liquidity "
+                "and 25k 24h volume. It buys on the first qualifying live snapshot at or above 20k market cap. "
                 "After entry, it exits on the first snapshot that reaches {multiple:.1f}x of the entry market cap."
             ),
             "label_template": "Direct {multiple:.1f}x",
             "entry_rule": "threshold",
+            "targets": DIRECT_TARGETS,
         },
         {
             "family": "2x Confirmation",
             "prefix": "Confirmed",
-            "buy_market_cap": 20_000.0,
-            "requires_prior_threshold": 20_000.0,
+            "buy_market_cap": ENTRY_MARKET_CAP_MIN,
+            "requires_prior_threshold": ENTRY_MARKET_CAP_MIN,
             "description_template": (
-                "Uses the first snapshot at or above 20k market cap as a baseline. "
+                "Uses only tokens first detected between 20k and 100k market cap with at least 15k liquidity "
+                "and 25k 24h volume. It takes the first 20k-plus snapshot as a baseline. "
                 "It only enters later, once market cap reaches 2x that baseline, and then exits on the first "
                 "snapshot that reaches {multiple:.1f}x of its actual entry market cap."
             ),
             "label_template": "Confirmed {multiple:.1f}x",
             "entry_rule": "double_from_baseline",
+            "targets": CONFIRMED_TARGETS,
         },
     )
 
     for spec in strategy_specs:
-        max_multiple = MAX_TARGET_MARKET_CAP / spec["buy_market_cap"]
-        multiple = MIN_SELL_MULTIPLE
-        while multiple <= max_multiple + 1e-9:
+        for multiple in spec["targets"]:
             traders.append(
                 TraderConfig(
                     name=f"{spec['prefix']}_{multiple:.1f}x",
@@ -68,7 +73,6 @@ def _build_traders() -> tuple[TraderConfig, ...]:
                     entry_rule=spec["entry_rule"],
                 )
             )
-            multiple += MULTIPLE_STEP
 
     return tuple(traders)
 
@@ -84,15 +88,23 @@ def evaluate_traders(
     max_token_age_seconds: int,
 ) -> None:
     latest_snapshots = repository.latest_snapshots_for_tokens(token_states.keys())
+    first_snapshots = repository.first_snapshots_for_tokens(token_states.keys())
+    suspicious_tokens = {
+        token_address: _latest_snapshot_looks_suspicious(repository, snapshot)
+        for token_address, snapshot in latest_snapshots.items()
+    }
     for config in TRADERS:
         for token_address in token_states:
             snapshot = latest_snapshots.get(token_address)
             market_cap = snapshot.market_cap if snapshot is not None else None
             if market_cap is None or market_cap <= 0:
                 continue
+            if suspicious_tokens.get(token_address):
+                continue
             if repository.has_ever_position(config.name, token_address):
                 continue
-            if _should_open_position(repository, config, token_address, market_cap):
+            first_snapshot = first_snapshots.get(token_address)
+            if _should_open_position(repository, config, token_address, market_cap, first_snapshot):
                 repository.open_position(
                     trader_name=config.name,
                     token_address=token_address,
@@ -108,6 +120,8 @@ def evaluate_traders(
         snapshot = latest_snapshots.get(position.token_address)
         current_market_cap = snapshot.market_cap if snapshot is not None else None
         if current_market_cap is None or current_market_cap <= 0:
+            continue
+        if suspicious_tokens.get(position.token_address):
             continue
         trader = _trader_config(position.trader_name)
         age_seconds = observed_at - state.first_seen_at
@@ -144,6 +158,38 @@ def _position_value(amount_usd: float, opened_market_cap: float, snapshot: Lates
     return min(current_value, max(float(snapshot.liquidity_usd), 0.0))
 
 
+def _latest_snapshot_looks_suspicious(repository: Repository, snapshot: LatestSnapshot | None) -> bool:
+    if snapshot is None:
+        return False
+    previous = repository.previous_snapshot_for_token(snapshot.token_address, snapshot.observed_at)
+    return _is_extreme_snapshot_jump(previous, snapshot)
+
+
+def _is_extreme_snapshot_jump(previous: LatestSnapshot | None, current: LatestSnapshot | None) -> bool:
+    if previous is None or current is None:
+        return False
+    previous_market_cap = float(previous.market_cap or 0.0)
+    current_market_cap = float(current.market_cap or 0.0)
+    if previous_market_cap <= 0 or current_market_cap <= 0:
+        return False
+
+    market_cap_jump = current_market_cap / previous_market_cap
+    if market_cap_jump < 100.0:
+        return False
+
+    price_jump = _positive_ratio(current.price_usd, previous.price_usd)
+    liquidity_jump = _positive_ratio(current.liquidity_usd, previous.liquidity_usd)
+    return (price_jump is not None and price_jump >= 100.0) or (
+        liquidity_jump is not None and liquidity_jump >= 100.0
+    )
+
+
+def _positive_ratio(current: float | None, previous: float | None) -> float | None:
+    if current is None or previous is None or previous <= 0:
+        return None
+    return float(current) / float(previous)
+
+
 def _trader_config(trader_name: str) -> TraderConfig:
     for trader in TRADERS:
         if trader.name == trader_name:
@@ -173,7 +219,10 @@ def _should_open_position(
     config: TraderConfig,
     token_address: str,
     current_market_cap: float,
+    first_snapshot: FirstSnapshot | None,
 ) -> bool:
+    if not _passes_quality_filters(first_snapshot):
+        return False
     if config.entry_rule == "threshold":
         return current_market_cap >= config.buy_market_cap
 
@@ -184,6 +233,19 @@ def _should_open_position(
         return current_market_cap >= baseline * 2.0
 
     raise KeyError(f"Unknown entry rule {config.entry_rule}")
+
+
+def _passes_quality_filters(first_snapshot: FirstSnapshot | None) -> bool:
+    if first_snapshot is None or first_snapshot.market_cap is None:
+        return False
+    market_cap = float(first_snapshot.market_cap)
+    liquidity = float(first_snapshot.liquidity_usd or 0.0)
+    volume = float(first_snapshot.volume_h24 or 0.0)
+    return (
+        ENTRY_MARKET_CAP_MIN <= market_cap <= ENTRY_MARKET_CAP_MAX
+        and liquidity >= ENTRY_LIQUIDITY_MIN
+        and volume >= ENTRY_VOLUME_MIN
+    )
 
 
 def _first_market_cap_at_or_above(

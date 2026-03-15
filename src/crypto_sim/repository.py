@@ -28,8 +28,19 @@ class OpenPosition:
 @dataclass(frozen=True)
 class LatestSnapshot:
     token_address: str
+    observed_at: int
     market_cap: float | None
     liquidity_usd: float | None
+    price_usd: float | None
+
+
+@dataclass(frozen=True)
+class FirstSnapshot:
+    token_address: str
+    observed_at: int
+    market_cap: float | None
+    liquidity_usd: float | None
+    volume_h24: float | None
 
 
 class Repository:
@@ -420,6 +431,7 @@ class Repository:
         return self.connection.execute(
             """
             SELECT
+                token_address,
                 trader_name,
                 opened_at,
                 opened_market_cap,
@@ -493,7 +505,7 @@ class Repository:
         placeholders = ",".join("?" for _ in addresses)
         rows = self.connection.execute(
             f"""
-            SELECT token_address, market_cap, liquidity_usd
+            SELECT token_address, observed_at, market_cap, liquidity_usd, price_usd
             FROM market_cap_history
             WHERE (token_address, observed_at) IN (
                 SELECT token_address, MAX(observed_at)
@@ -507,8 +519,100 @@ class Repository:
         return {
             row["token_address"]: LatestSnapshot(
                 token_address=row["token_address"],
+                observed_at=row["observed_at"],
                 market_cap=row["market_cap"],
                 liquidity_usd=row["liquidity_usd"],
+                price_usd=row["price_usd"],
+            )
+            for row in rows
+        }
+
+    def snapshot_at(self, token_address: str, observed_at: int) -> LatestSnapshot | None:
+        row = self.connection.execute(
+            """
+            SELECT token_address, observed_at, market_cap, liquidity_usd, price_usd
+            FROM market_cap_history
+            WHERE token_address = ? AND observed_at = ?
+            """,
+            (token_address, observed_at),
+        ).fetchone()
+        if row is None:
+            return None
+        return LatestSnapshot(
+            token_address=row["token_address"],
+            observed_at=row["observed_at"],
+            market_cap=row["market_cap"],
+            liquidity_usd=row["liquidity_usd"],
+            price_usd=row["price_usd"],
+        )
+
+    def previous_snapshot_for_token(self, token_address: str, observed_at: int) -> LatestSnapshot | None:
+        row = self.connection.execute(
+            """
+            SELECT token_address, observed_at, market_cap, liquidity_usd, price_usd
+            FROM market_cap_history
+            WHERE token_address = ? AND observed_at < ?
+            ORDER BY observed_at DESC
+            LIMIT 1
+            """,
+            (token_address, observed_at),
+        ).fetchone()
+        if row is None:
+            return None
+        return LatestSnapshot(
+            token_address=row["token_address"],
+            observed_at=row["observed_at"],
+            market_cap=row["market_cap"],
+            liquidity_usd=row["liquidity_usd"],
+            price_usd=row["price_usd"],
+        )
+
+    def next_snapshot_for_token(self, token_address: str, observed_at: int) -> LatestSnapshot | None:
+        row = self.connection.execute(
+            """
+            SELECT token_address, observed_at, market_cap, liquidity_usd, price_usd
+            FROM market_cap_history
+            WHERE token_address = ? AND observed_at > ?
+            ORDER BY observed_at ASC
+            LIMIT 1
+            """,
+            (token_address, observed_at),
+        ).fetchone()
+        if row is None:
+            return None
+        return LatestSnapshot(
+            token_address=row["token_address"],
+            observed_at=row["observed_at"],
+            market_cap=row["market_cap"],
+            liquidity_usd=row["liquidity_usd"],
+            price_usd=row["price_usd"],
+        )
+
+    def first_snapshots_for_tokens(self, token_addresses: Iterable[str]) -> dict[str, FirstSnapshot]:
+        addresses = list(token_addresses)
+        if not addresses:
+            return {}
+        placeholders = ",".join("?" for _ in addresses)
+        rows = self.connection.execute(
+            f"""
+            SELECT token_address, observed_at, market_cap, liquidity_usd, volume_h24
+            FROM market_cap_history
+            WHERE (token_address, observed_at) IN (
+                SELECT token_address, MIN(observed_at)
+                FROM market_cap_history
+                WHERE token_address IN ({placeholders})
+                GROUP BY token_address
+            )
+            """,
+            addresses,
+        ).fetchall()
+        return {
+            row["token_address"]: FirstSnapshot(
+                token_address=row["token_address"],
+                observed_at=row["observed_at"],
+                market_cap=row["market_cap"],
+                liquidity_usd=row["liquidity_usd"],
+                volume_h24=row["volume_h24"],
             )
             for row in rows
         }

@@ -12,7 +12,8 @@ if str(SRC) not in sys.path:
 
 from crypto_sim.repository import Repository
 from crypto_sim.dashboard import _position_with_live_values
-from crypto_sim.simulator import evaluate_traders
+from crypto_sim.repository import LatestSnapshot
+from crypto_sim.simulator import _is_extreme_snapshot_jump, evaluate_traders, trader_configs
 
 
 def _repository() -> Repository:
@@ -71,20 +72,52 @@ def _repository() -> Repository:
 
 
 class SimulatorTests(unittest.TestCase):
+    def test_trader_set_is_pruned_to_curated_targets(self) -> None:
+        self.assertEqual(
+            [config.name for config in trader_configs()],
+            [
+                "Direct_3.0x",
+                "Direct_3.5x",
+                "Direct_4.0x",
+                "Direct_4.5x",
+                "Confirmed_1.5x",
+                "Confirmed_2.0x",
+                "Confirmed_2.5x",
+            ],
+        )
+
+    def test_extreme_one_tick_jump_is_marked_suspicious(self) -> None:
+        previous = LatestSnapshot(
+            token_address="token0",
+            observed_at=1000,
+            market_cap=150_000.0,
+            liquidity_usd=32_000.0,
+            price_usd=0.00015,
+        )
+        current = LatestSnapshot(
+            token_address="token0",
+            observed_at=1100,
+            market_cap=177_000_000.0,
+            liquidity_usd=21_000_000.0,
+            price_usd=0.177,
+        )
+
+        self.assertTrue(_is_extreme_snapshot_jump(previous, current))
+
     def test_trader_a_and_c_buy_at_20k_and_exit_on_targets(self) -> None:
         repository = _repository()
         repository.connection.execute(
             """
             INSERT INTO tokens (
-                token_address, chain_id, first_seen_at, last_seen_at, latest_market_cap, latest_checked_at
-            ) VALUES ('token1', 'solana', 1000, 1000, 20000, 1000)
+                token_address, chain_id, first_seen_at, last_seen_at, first_market_cap, latest_market_cap, latest_liquidity_usd, latest_volume_h24, latest_checked_at
+            ) VALUES ('token1', 'solana', 1000, 1000, 20000, 20000, 20000, 30000, 1000)
             """
         )
         repository.connection.execute(
             """
             INSERT INTO market_cap_history (
                 token_address, observed_at, market_cap, price_usd, liquidity_usd, volume_h24
-            ) VALUES ('token1', 1000, 20000, NULL, NULL, NULL)
+            ) VALUES ('token1', 1000, 20000, NULL, 20000, 30000)
             """
         )
 
@@ -95,17 +128,16 @@ class SimulatorTests(unittest.TestCase):
             "SELECT trader_name FROM trader_positions WHERE status = 'OPEN' ORDER BY trader_name"
         ).fetchall()
         trader_names = [row["trader_name"] for row in open_rows]
-        self.assertIn("Direct_1.5x", trader_names)
-        self.assertIn("Direct_2.0x", trader_names)
+        self.assertEqual(trader_names, ["Direct_3.0x", "Direct_3.5x", "Direct_4.0x", "Direct_4.5x"])
 
         repository.connection.execute(
-            "UPDATE tokens SET latest_market_cap = 40000, latest_checked_at = 1100 WHERE token_address = 'token1'"
+            "UPDATE tokens SET latest_market_cap = 80000, latest_liquidity_usd = 20000, latest_volume_h24 = 30000, latest_checked_at = 1100 WHERE token_address = 'token1'"
         )
         repository.connection.execute(
             """
             INSERT INTO market_cap_history (
                 token_address, observed_at, market_cap, price_usd, liquidity_usd, volume_h24
-            ) VALUES ('token1', 1100, 40000, NULL, NULL, NULL)
+            ) VALUES ('token1', 1100, 80000, NULL, 20000, 30000)
             """
         )
         states = repository.token_states()
@@ -123,36 +155,37 @@ class SimulatorTests(unittest.TestCase):
             row["trader_name"]: (row["proceeds_usd"], row["close_reason"])
             for row in closed
         }
-        self.assertEqual(closed_map["Direct_1.5x"], (20.0, "target_1.50x"))
-        self.assertEqual(closed_map["Direct_2.0x"], (20.0, "target_2.00x"))
+        self.assertEqual(closed_map["Direct_3.0x"], (40.0, "target_3.00x"))
+        self.assertEqual(closed_map["Direct_3.5x"], (40.0, "target_3.50x"))
+        self.assertEqual(closed_map["Direct_4.0x"], (40.0, "target_4.00x"))
 
     def test_trader_b_and_d_buy_after_40k_once_20k_seen(self) -> None:
         repository = _repository()
         repository.connection.execute(
             """
             INSERT INTO tokens (
-                token_address, chain_id, first_seen_at, last_seen_at, latest_market_cap, latest_checked_at
-            ) VALUES ('token2', 'solana', 1000, 1000, 20000, 1000)
+                token_address, chain_id, first_seen_at, last_seen_at, first_market_cap, latest_market_cap, latest_liquidity_usd, latest_volume_h24, latest_checked_at
+            ) VALUES ('token2', 'solana', 1000, 1000, 20000, 20000, 22000, 35000, 1000)
             """
         )
         repository.connection.execute(
             """
             INSERT INTO market_cap_history (
                 token_address, observed_at, market_cap, price_usd, liquidity_usd, volume_h24
-            ) VALUES ('token2', 1000, 20000, NULL, NULL, NULL)
+            ) VALUES ('token2', 1000, 20000, NULL, 22000, 35000)
             """
         )
         states = repository.token_states()
         evaluate_traders(repository, states, observed_at=1000, position_size_usd=10.0, max_token_age_seconds=86400)
 
         repository.connection.execute(
-            "UPDATE tokens SET latest_market_cap = 40000, latest_checked_at = 1100 WHERE token_address = 'token2'"
+            "UPDATE tokens SET latest_market_cap = 40000, latest_liquidity_usd = 22000, latest_volume_h24 = 35000, latest_checked_at = 1100 WHERE token_address = 'token2'"
         )
         repository.connection.execute(
             """
             INSERT INTO market_cap_history (
                 token_address, observed_at, market_cap, price_usd, liquidity_usd, volume_h24
-            ) VALUES ('token2', 1100, 40000, NULL, NULL, NULL)
+            ) VALUES ('token2', 1100, 40000, NULL, 22000, 35000)
             """
         )
         states = repository.token_states()
@@ -162,36 +195,46 @@ class SimulatorTests(unittest.TestCase):
             "SELECT trader_name FROM trader_positions WHERE status = 'OPEN' ORDER BY trader_name"
         ).fetchall()
         trader_names = [row["trader_name"] for row in open_rows]
-        self.assertIn("Confirmed_1.5x", trader_names)
-        self.assertIn("Confirmed_2.0x", trader_names)
+        self.assertEqual(
+            trader_names,
+            [
+                "Confirmed_1.5x",
+                "Confirmed_2.0x",
+                "Confirmed_2.5x",
+                "Direct_3.0x",
+                "Direct_3.5x",
+                "Direct_4.0x",
+                "Direct_4.5x",
+            ],
+        )
 
     def test_open_positions_are_force_closed_after_one_day(self) -> None:
         repository = _repository()
         repository.connection.execute(
             """
             INSERT INTO tokens (
-                token_address, chain_id, first_seen_at, last_seen_at, latest_market_cap, latest_checked_at
-            ) VALUES ('token3', 'solana', 1000, 1000, 20000, 1000)
+                token_address, chain_id, first_seen_at, last_seen_at, first_market_cap, latest_market_cap, latest_liquidity_usd, latest_volume_h24, latest_checked_at
+            ) VALUES ('token3', 'solana', 1000, 1000, 25000, 25000, 20000, 30000, 1000)
             """
         )
         repository.connection.execute(
             """
             INSERT INTO market_cap_history (
                 token_address, observed_at, market_cap, price_usd, liquidity_usd, volume_h24
-            ) VALUES ('token3', 1000, 20000, NULL, NULL, NULL)
+            ) VALUES ('token3', 1000, 25000, NULL, 20000, 30000)
             """
         )
         states = repository.token_states()
         evaluate_traders(repository, states, observed_at=1000, position_size_usd=10.0, max_token_age_seconds=86400)
 
         repository.connection.execute(
-            "UPDATE tokens SET latest_market_cap = 10000, latest_checked_at = 90000 WHERE token_address = 'token3'"
+            "UPDATE tokens SET latest_market_cap = 10000, latest_liquidity_usd = 20000, latest_volume_h24 = 30000, latest_checked_at = 90000 WHERE token_address = 'token3'"
         )
         repository.connection.execute(
             """
             INSERT INTO market_cap_history (
                 token_address, observed_at, market_cap, price_usd, liquidity_usd, volume_h24
-            ) VALUES ('token3', 90000, 10000, NULL, NULL, NULL)
+            ) VALUES ('token3', 90000, 10000, NULL, 20000, 30000)
             """
         )
         states = repository.token_states()
@@ -209,8 +252,8 @@ class SimulatorTests(unittest.TestCase):
             row["trader_name"]: (row["proceeds_usd"], row["close_reason"])
             for row in closed
         }
-        self.assertEqual(closed_map["Direct_1.5x"], (5.0, "max_age_exit"))
-        self.assertEqual(closed_map["Direct_2.0x"], (5.0, "max_age_exit"))
+        self.assertEqual(closed_map["Direct_3.0x"], (4.0, "max_age_exit"))
+        self.assertEqual(closed_map["Direct_3.5x"], (4.0, "max_age_exit"))
 
     def test_exit_proceeds_are_capped_by_available_liquidity(self) -> None:
         repository = _repository()
@@ -218,14 +261,14 @@ class SimulatorTests(unittest.TestCase):
             """
             INSERT INTO tokens (
                 token_address, chain_id, first_seen_at, last_seen_at, latest_market_cap, latest_liquidity_usd, latest_checked_at
-            ) VALUES ('token4', 'solana', 1000, 1000, 20000, 5000, 1000)
+            ) VALUES ('token4', 'solana', 1000, 1000, 25000, 20000, 1000)
             """
         )
         repository.connection.execute(
             """
             INSERT INTO market_cap_history (
                 token_address, observed_at, market_cap, price_usd, liquidity_usd, volume_h24
-            ) VALUES ('token4', 1000, 20000, NULL, 5000, NULL)
+            ) VALUES ('token4', 1000, 25000, NULL, 20000, 30000)
             """
         )
 
@@ -258,8 +301,31 @@ class SimulatorTests(unittest.TestCase):
             row["trader_name"]: (row["proceeds_usd"], row["pnl_usd"])
             for row in closed
         }
-        self.assertEqual(closed_map["Direct_1.5x"], (1.0, -9.0))
-        self.assertEqual(closed_map["Direct_2.0x"], (1.0, -9.0))
+        self.assertEqual(closed_map["Direct_3.0x"], (1.0, -9.0))
+        self.assertEqual(closed_map["Direct_3.5x"], (1.0, -9.0))
+
+    def test_low_quality_detection_is_skipped(self) -> None:
+        repository = _repository()
+        repository.connection.execute(
+            """
+            INSERT INTO tokens (
+                token_address, chain_id, first_seen_at, last_seen_at, first_market_cap, latest_market_cap, latest_liquidity_usd, latest_volume_h24, latest_checked_at
+            ) VALUES ('token5', 'solana', 1000, 1000, 15000, 40000, 10000, 10000, 1000)
+            """
+        )
+        repository.connection.execute(
+            """
+            INSERT INTO market_cap_history (
+                token_address, observed_at, market_cap, price_usd, liquidity_usd, volume_h24
+            ) VALUES ('token5', 1000, 15000, NULL, 10000, 10000)
+            """
+        )
+
+        states = repository.token_states()
+        evaluate_traders(repository, states, observed_at=1000, position_size_usd=10.0, max_token_age_seconds=86400)
+
+        count = repository.connection.execute("SELECT COUNT(*) FROM trader_positions").fetchone()[0]
+        self.assertEqual(count, 0)
 
     def test_unrealized_value_is_capped_by_live_liquidity(self) -> None:
         item = _position_with_live_values(

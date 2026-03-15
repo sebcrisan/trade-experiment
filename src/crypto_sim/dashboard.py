@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 import json
+import sqlite3
 from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -9,7 +10,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from crypto_sim.db import connect
-from crypto_sim.repository import Repository
+from crypto_sim.repository import LatestSnapshot, Repository
 from crypto_sim.simulator import trader_configs
 
 
@@ -415,6 +416,16 @@ HTML = """<!doctype html>
       background: var(--panel-soft);
       font-size: 14px;
     }
+    .load-error {
+      margin-bottom: 16px;
+      padding: 14px 16px;
+      border-radius: 14px;
+      border: 1px solid rgba(255, 107, 124, 0.35);
+      background: rgba(255, 107, 124, 0.12);
+      color: #ffd4da;
+      font-size: 14px;
+      display: none;
+    }
     @media (max-width: 1400px) {
       .leaderboard-grid {
         grid-template-columns: 1fr;
@@ -470,6 +481,7 @@ HTML = """<!doctype html>
 </head>
 <body>
   <div class="wrap">
+    <div class="load-error" id="load-error"></div>
     <header class="topbar">
       <div>
         <div class="page-kicker">Solana Strategy Dashboard</div>
@@ -578,6 +590,31 @@ HTML = """<!doctype html>
   </div>
 
   <script>
+    async function fetchJson(url) {
+      const response = await fetch(url);
+      const contentType = response.headers.get("content-type") || "";
+      const body = await response.text();
+      if (!response.ok) {
+        throw new Error(body || `Request failed with status ${response.status}`);
+      }
+      if (!contentType.includes("application/json")) {
+        throw new Error(`Expected JSON but received ${contentType || "unknown content type"}.`);
+      }
+      return JSON.parse(body);
+    }
+
+    function showLoadError(message) {
+      const error = document.getElementById("load-error");
+      error.textContent = message;
+      error.style.display = "block";
+    }
+
+    function clearLoadError() {
+      const error = document.getElementById("load-error");
+      error.textContent = "";
+      error.style.display = "none";
+    }
+
     function fmtUsd(value, digits = 2) {
       if (value === null || value === undefined) return "-";
       return new Intl.NumberFormat("en-US", {
@@ -647,22 +684,23 @@ HTML = """<!doctype html>
     }
 
     async function load() {
-      const response = await fetch("/api/dashboard");
-      const data = await response.json();
+      try {
+        const data = await fetchJson("/api/dashboard");
+        clearLoadError();
 
-      document.getElementById("updated").textContent = `Updated ${new Date().toLocaleString()}`;
+        document.getElementById("updated").textContent = `Updated ${new Date().toLocaleString()}`;
 
-      document.getElementById("summary").innerHTML = [
-        metricCard("Strategies", fmtCount(data.summary.strategy_count), "Total generated trader variants currently ranked."),
-        metricCard("Families", fmtCount(data.summary.family_count), "Independent entry-rule families in the simulator."),
-        metricCard("Closed Trades", fmtCount(data.summary.closed_trades), "Positions that have already been fully exited."),
-        metricCard("Profitable Strategies", fmtCount(data.summary.profitable_strategies), "Strategies with positive current net PnL.")
-      ].join("");
+        document.getElementById("summary").innerHTML = [
+          metricCard("Strategies", fmtCount(data.summary.strategy_count), "Total generated trader variants currently ranked."),
+          metricCard("Families", fmtCount(data.summary.family_count), "Independent entry-rule families in the simulator."),
+          metricCard("Closed Trades", fmtCount(data.summary.closed_trades), "Positions that have already been fully exited."),
+          metricCard("Profitable Strategies", fmtCount(data.summary.profitable_strategies), "Strategies with positive current net PnL.")
+        ].join("");
 
-      document.getElementById("best-traders").innerHTML = renderTraderCards(data.best_traders);
-      document.getElementById("worst-traders").innerHTML = renderTraderCards(data.worst_traders);
+        document.getElementById("best-traders").innerHTML = renderTraderCards(data.best_traders);
+        document.getElementById("worst-traders").innerHTML = renderTraderCards(data.worst_traders);
 
-      document.getElementById("strategies").innerHTML = data.family_guides.map((row) => `
+        document.getElementById("strategies").innerHTML = data.family_guides.map((row) => `
         <div class="strategy-card">
           <div class="strategy-family">${row.family}</div>
           <h3>${row.headline}</h3>
@@ -676,7 +714,7 @@ HTML = """<!doctype html>
         </div>
       `).join("");
 
-      document.getElementById("top-tokens").innerHTML = data.top_tokens.length ? data.top_tokens.map((row) => `
+        document.getElementById("top-tokens").innerHTML = data.top_tokens.length ? data.top_tokens.map((row) => `
         <tr>
           <td>
             <div class="token-primary">${row.symbol || "-"}</div>
@@ -694,7 +732,7 @@ HTML = """<!doctype html>
         </tr>
       `).join("") : `<tr><td colspan="6">No token performance data yet.</td></tr>`;
 
-      document.getElementById("tokens").innerHTML = data.tokens.length ? data.tokens.map((row) => `
+        document.getElementById("tokens").innerHTML = data.tokens.length ? data.tokens.map((row) => `
         <tr>
           <td>
             <div class="token-primary">${row.symbol || "-"}</div>
@@ -710,7 +748,12 @@ HTML = """<!doctype html>
           <td>${fmtUsd(row.latest_price_usd, 8)}</td>
           <td>${fmtDate(row.first_seen_at)}</td>
         </tr>
-      `).join("") : `<tr><td colspan="6">No tokens available yet.</td></tr>`;
+        `).join("") : `<tr><td colspan="6">No tokens available yet.</td></tr>`;
+      } catch (error) {
+        console.error(error);
+        document.getElementById("updated").textContent = "Update failed";
+        showLoadError(error instanceof Error ? error.message : "Failed to load dashboard data.");
+      }
     }
 
     load();
@@ -808,6 +851,16 @@ def token_detail_html(token_address: str) -> str:
     .mono {{ font-family: Consolas, monospace; font-size: 12px; }}
     .pos {{ color: var(--accent); }}
     .neg {{ color: #ff6b6b; }}
+    .load-error {{
+      margin-bottom: 16px;
+      padding: 14px 16px;
+      border-radius: 14px;
+      border: 1px solid rgba(255, 107, 107, 0.35);
+      background: rgba(255, 107, 107, 0.12);
+      color: #ffd4d4;
+      font-size: 14px;
+      display: none;
+    }}
     @media (max-width: 900px) {{
       .grid {{ grid-template-columns: 1fr 1fr; }}
     }}
@@ -818,6 +871,7 @@ def token_detail_html(token_address: str) -> str:
 </head>
 <body>
   <div class="wrap">
+    <div class="load-error" id="load-error"></div>
     <div class="top">
       <div>
         <div class="back"><a href="/">Back to dashboard</a></div>
@@ -855,6 +909,31 @@ def token_detail_html(token_address: str) -> str:
 
   <script>
     const tokenAddress = {json.dumps(token_address)};
+
+    async function fetchJson(url) {{
+      const response = await fetch(url);
+      const contentType = response.headers.get("content-type") || "";
+      const body = await response.text();
+      if (!response.ok) {{
+        throw new Error(body || `Request failed with status ${{response.status}}`);
+      }}
+      if (!contentType.includes("application/json")) {{
+        throw new Error(`Expected JSON but received ${{contentType || "unknown content type"}}.`);
+      }}
+      return JSON.parse(body);
+    }}
+
+    function showLoadError(message) {{
+      const error = document.getElementById("load-error");
+      error.textContent = message;
+      error.style.display = "block";
+    }}
+
+    function clearLoadError() {{
+      const error = document.getElementById("load-error");
+      error.textContent = "";
+      error.style.display = "none";
+    }}
 
     function fmtUsd(value, digits = 2) {{
       if (value === null || value === undefined) return "-";
@@ -929,27 +1008,24 @@ def token_detail_html(token_address: str) -> str:
     }}
 
     async function load() {{
-      const response = await fetch(`/api/token/${{encodeURIComponent(tokenAddress)}}`);
-      if (!response.ok) {{
-        document.getElementById("title").textContent = "Token not found";
-        return;
-      }}
-      const data = await response.json();
-      const token = data.token;
-      document.getElementById("updated").textContent = `Updated ${{new Date().toLocaleString()}}`;
-      document.getElementById("title").textContent = `${{token.symbol || "Unknown"}} token detail`;
-      document.getElementById("summary").innerHTML = [
-        card("Latest Mcap", fmtUsd(token.latest_market_cap, 0)),
-        card("Latest Price", fmtUsd(token.latest_price_usd, 8)),
-        card("Liquidity", fmtUsd(token.latest_liquidity_usd, 0)),
-        card("Volume 24h", fmtUsd(token.latest_volume_h24, 0))
-      ].join("");
+      try {{
+        const data = await fetchJson(`/api/token/${{encodeURIComponent(tokenAddress)}}`);
+        clearLoadError();
+        const token = data.token;
+        document.getElementById("updated").textContent = `Updated ${{new Date().toLocaleString()}}`;
+        document.getElementById("title").textContent = `${{token.symbol || "Unknown"}} token detail`;
+        document.getElementById("summary").innerHTML = [
+          card("Latest Mcap", fmtUsd(token.latest_market_cap, 0)),
+          card("Latest Price", fmtUsd(token.latest_price_usd, 8)),
+          card("Liquidity", fmtUsd(token.latest_liquidity_usd, 0)),
+          card("Volume 24h", fmtUsd(token.latest_volume_h24, 0))
+        ].join("");
 
-      drawChart(data.history);
-      document.getElementById("chart-meta").textContent =
-        `${{data.history.length}} snapshots from ${{fmtDate(token.first_seen_at)}} to ${{fmtDate(token.last_seen_at)}}`;
+        drawChart(data.history);
+        document.getElementById("chart-meta").textContent =
+          `${{data.history.length}} snapshots from ${{fmtDate(token.first_seen_at)}} to ${{fmtDate(token.last_seen_at)}}`;
 
-      document.getElementById("positions").innerHTML = data.positions.length ? data.positions.map((row) => `
+        document.getElementById("positions").innerHTML = data.positions.length ? data.positions.map((row) => `
         <tr>
           <td>${{row.trader_name}}</td>
           <td>${{row.status}}</td>
@@ -958,7 +1034,12 @@ def token_detail_html(token_address: str) -> str:
           <td class="${{(row.pnl_usd || 0) >= 0 ? "pos" : "neg"}}">${{fmtUsd(row.pnl_usd)}}</td>
           <td>${{row.close_reason || "-"}}</td>
         </tr>
-      `).join("") : `<tr><td colspan="6">No trader activity for this token yet.</td></tr>`;
+        `).join("") : `<tr><td colspan="6">No trader activity for this token yet.</td></tr>`;
+      }} catch (error) {{
+        console.error(error);
+        document.getElementById("updated").textContent = "Update failed";
+        showLoadError(error instanceof Error ? error.message : "Failed to load token data.");
+      }}
     }}
 
     load();
@@ -1013,6 +1094,7 @@ def trader_detail_html(trader_name: str) -> str:
     .value {{ margin-top: 8px; font-size: 26px; font-weight: 700; }}
     .panel {{ overflow: hidden; margin-bottom: 16px; }}
     .panel h2 {{ margin: 0; padding: 16px 18px 0; font-size: 20px; }}
+    .panel-copy {{ padding: 8px 18px 0; color: var(--muted); font-size: 13px; }}
     table {{ width: 100%; border-collapse: collapse; }}
     th, td {{ padding: 12px 18px; border-top: 1px solid var(--border); text-align: left; font-size: 14px; }}
     th {{ color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; font-size: 12px; }}
@@ -1027,12 +1109,42 @@ def trader_detail_html(trader_name: str) -> str:
       background: rgba(255,255,255,0.03);
       font-size: 12px;
     }}
+    .controls {{
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 0 0 16px;
+      padding: 14px 16px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+    }}
+    .controls label {{
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }}
+    .controls input {{ accent-color: var(--accent); }}
+    .is-hidden {{ display: none; }}
+    .load-error {{
+      margin-bottom: 16px;
+      padding: 14px 16px;
+      border-radius: 14px;
+      border: 1px solid rgba(255, 107, 107, 0.35);
+      background: rgba(255, 107, 107, 0.12);
+      color: #ffd4d4;
+      font-size: 14px;
+      display: none;
+    }}
     @media (max-width: 1000px) {{ .grid {{ grid-template-columns: 1fr 1fr; }} }}
     @media (max-width: 640px) {{ .grid {{ grid-template-columns: 1fr; }} }}
   </style>
 </head>
 <body>
   <div class="wrap">
+    <div class="load-error" id="load-error"></div>
     <div class="top">
       <div>
         <div class="back"><a href="/">Back to dashboard</a></div>
@@ -1044,17 +1156,19 @@ def trader_detail_html(trader_name: str) -> str:
 
     <div class="grid" id="summary"></div>
 
+    <div class="controls" id="column-filters"></div>
+
     <section class="panel">
       <h2>Open Positions</h2>
       <table>
         <thead>
           <tr>
-            <th>Token</th>
-            <th>Entry Mcap</th>
-            <th>Current Mcap</th>
-            <th>Cost</th>
-            <th>Current Value</th>
-            <th>Unrealized PnL</th>
+            <th data-category="identity">Token</th>
+            <th data-category="market">Entry Mcap</th>
+            <th data-category="market">Current Mcap</th>
+            <th data-category="cash">Cost</th>
+            <th data-category="cash">Current Value</th>
+            <th data-category="outcome">Unrealized PnL</th>
           </tr>
         </thead>
         <tbody id="open-positions"></tbody>
@@ -1063,16 +1177,19 @@ def trader_detail_html(trader_name: str) -> str:
 
     <section class="panel">
       <h2>Closed Positions</h2>
+      <div class="panel-copy">Profitable closed trades only.</div>
       <table>
         <thead>
           <tr>
-            <th>Token</th>
-            <th>Opened</th>
-            <th>Closed</th>
-            <th>Cost</th>
-            <th>Proceeds</th>
-            <th>PnL</th>
-            <th>Reason</th>
+            <th data-category="identity">Token</th>
+            <th data-category="timing">Opened</th>
+            <th data-category="timing">Closed</th>
+            <th data-category="market">Entry Mcap</th>
+            <th data-category="market">Exit Mcap</th>
+            <th data-category="cash">Cost</th>
+            <th data-category="cash">Proceeds</th>
+            <th data-category="outcome">PnL</th>
+            <th data-category="outcome">Reason</th>
           </tr>
         </thead>
         <tbody id="closed-positions"></tbody>
@@ -1082,6 +1199,38 @@ def trader_detail_html(trader_name: str) -> str:
 
   <script>
     const traderName = {json.dumps(trader_name)};
+    const columnCategories = [
+      ["identity", "Token"],
+      ["timing", "Timing"],
+      ["market", "Market Caps"],
+      ["cash", "Cash Flow"],
+      ["outcome", "Outcome"]
+    ];
+
+    async function fetchJson(url) {{
+      const response = await fetch(url);
+      const contentType = response.headers.get("content-type") || "";
+      const body = await response.text();
+      if (!response.ok) {{
+        throw new Error(body || `Request failed with status ${{response.status}}`);
+      }}
+      if (!contentType.includes("application/json")) {{
+        throw new Error(`Expected JSON but received ${{contentType || "unknown content type"}}.`);
+      }}
+      return JSON.parse(body);
+    }}
+
+    function showLoadError(message) {{
+      const error = document.getElementById("load-error");
+      error.textContent = message;
+      error.style.display = "block";
+    }}
+
+    function clearLoadError() {{
+      const error = document.getElementById("load-error");
+      error.textContent = "";
+      error.style.display = "none";
+    }}
 
     function fmtUsd(value, digits = 2) {{
       if (value === null || value === undefined) return "-";
@@ -1101,58 +1250,86 @@ def trader_detail_html(trader_name: str) -> str:
       return `<div class="card"><div class="label">${{label}}</div><div class="value">${{value}}</div></div>`;
     }}
 
-    async function load() {{
-      const response = await fetch(`/api/trader/${{encodeURIComponent(traderName)}}`);
-      if (!response.ok) {{
-        document.getElementById("title").textContent = "Trader not found";
-        return;
-      }}
-      const data = await response.json();
-      document.getElementById("updated").textContent = `Updated ${{new Date().toLocaleString()}}`;
-      if (data.strategy) {{
-        document.getElementById("strategy-copy").textContent = data.strategy.description;
-      }}
-      document.getElementById("summary").innerHTML = [
-        card("Closed Trades", data.summary.total_trades),
-        card("Closed Spend", fmtUsd(data.summary.closed_spent)),
-        card("Open Capital", fmtUsd(data.summary.open_spent)),
-        card("Total Invested", fmtUsd(data.summary.total_invested)),
-        card("Realized PnL", fmtUsd(data.summary.realized_pnl)),
-        card("Unrealized PnL", fmtUsd(data.summary.unrealized_pnl)),
-        card("Net PnL", fmtUsd(data.summary.net_pnl))
-      ].join("");
+    function renderColumnFilters() {{
+      const root = document.getElementById("column-filters");
+      root.innerHTML = columnCategories.map(([key, label]) => `
+        <label><input type="checkbox" data-category-toggle="${{key}}" checked> ${{label}}</label>
+      `).join("");
+      root.querySelectorAll("input[data-category-toggle]").forEach((input) => {{
+        input.addEventListener("change", applyColumnFilters);
+      }});
+      applyColumnFilters();
+    }}
 
-      document.getElementById("open-positions").innerHTML = data.open_positions.length ? data.open_positions.map((row) => `
+    function applyColumnFilters() {{
+      const visible = new Set(
+        Array.from(document.querySelectorAll("input[data-category-toggle]"))
+          .filter((input) => input.checked)
+          .map((input) => input.dataset.categoryToggle)
+      );
+      document.querySelectorAll("[data-category]").forEach((cell) => {{
+        cell.classList.toggle("is-hidden", !visible.has(cell.dataset.category));
+      }});
+    }}
+
+    async function load() {{
+      try {{
+        const data = await fetchJson(`/api/trader/${{encodeURIComponent(traderName)}}`);
+        clearLoadError();
+        document.getElementById("updated").textContent = `Updated ${{new Date().toLocaleString()}}`;
+        if (data.strategy) {{
+          document.getElementById("strategy-copy").textContent = data.strategy.description;
+        }}
+        document.getElementById("summary").innerHTML = [
+          card("Profitable Closed", data.summary.total_trades),
+          card("All Closed", data.summary.closed_positions_count),
+          card("Closed Spend", fmtUsd(data.summary.closed_spent)),
+          card("Open Capital", fmtUsd(data.summary.open_spent)),
+          card("Total Invested", fmtUsd(data.summary.total_invested)),
+          card("Realized PnL", fmtUsd(data.summary.realized_pnl)),
+          card("Net PnL", fmtUsd(data.summary.net_pnl))
+        ].join("");
+
+        document.getElementById("open-positions").innerHTML = data.open_positions.length ? data.open_positions.map((row) => `
         <tr>
-          <td>
+          <td data-category="identity">
             <div>${{row.symbol || "-"}}</div>
             <div class="mono">${{row.token_address.slice(0, 14)}}...</div>
             <div><a href="/token/${{row.token_address}}">Token detail</a></div>
           </td>
-          <td>${{fmtUsd(row.opened_market_cap, 0)}}</td>
-          <td>${{fmtUsd(row.latest_market_cap, 0)}}</td>
-          <td>${{fmtUsd(row.amount_usd)}}</td>
-          <td>${{fmtUsd(row.current_value)}}</td>
-          <td class="${{row.unrealized_pnl >= 0 ? "pos" : "neg"}}">${{fmtUsd(row.unrealized_pnl)}}</td>
+          <td data-category="market">${{fmtUsd(row.opened_market_cap, 0)}}</td>
+          <td data-category="market">${{fmtUsd(row.latest_market_cap, 0)}}</td>
+          <td data-category="cash">${{fmtUsd(row.amount_usd)}}</td>
+          <td data-category="cash">${{fmtUsd(row.current_value)}}</td>
+          <td data-category="outcome" class="${{row.unrealized_pnl >= 0 ? "pos" : "neg"}}">${{fmtUsd(row.unrealized_pnl)}}</td>
         </tr>
-      `).join("") : `<tr><td colspan="6">No open positions.</td></tr>`;
+        `).join("") : `<tr><td colspan="6">No open positions.</td></tr>`;
 
-      document.getElementById("closed-positions").innerHTML = data.closed_positions.length ? data.closed_positions.map((row) => `
+        document.getElementById("closed-positions").innerHTML = data.closed_positions.length ? data.closed_positions.map((row) => `
         <tr>
-          <td>
+          <td data-category="identity">
             <div>${{row.symbol || "-"}}</div>
             <div class="mono">${{row.token_address.slice(0, 14)}}...</div>
           </td>
-          <td>${{fmtDate(row.opened_at)}}</td>
-          <td>${{fmtDate(row.closed_at)}}</td>
-          <td>${{fmtUsd(row.amount_usd)}}</td>
-          <td>${{fmtUsd(row.proceeds_usd)}}</td>
-          <td class="${{(row.pnl_usd || 0) >= 0 ? "pos" : "neg"}}">${{fmtUsd(row.pnl_usd)}}</td>
-          <td><span class="pill">${{row.close_reason || "-"}}</span></td>
+          <td data-category="timing">${{fmtDate(row.opened_at)}}</td>
+          <td data-category="timing">${{fmtDate(row.closed_at)}}</td>
+          <td data-category="market">${{fmtUsd(row.opened_market_cap, 0)}}</td>
+          <td data-category="market">${{fmtUsd(row.closed_market_cap, 0)}}</td>
+          <td data-category="cash">${{fmtUsd(row.amount_usd)}}</td>
+          <td data-category="cash">${{fmtUsd(row.proceeds_usd)}}</td>
+          <td data-category="outcome" class="${{(row.pnl_usd || 0) >= 0 ? "pos" : "neg"}}">${{fmtUsd(row.pnl_usd)}}</td>
+          <td data-category="outcome"><span class="pill">${{row.close_reason || "-"}}</span></td>
         </tr>
-      `).join("") : `<tr><td colspan="7">No closed positions yet.</td></tr>`;
+        `).join("") : `<tr><td colspan="9">No profitable closed positions yet.</td></tr>`;
+        applyColumnFilters();
+      }} catch (error) {{
+        console.error(error);
+        document.getElementById("updated").textContent = "Update failed";
+        showLoadError(error instanceof Error ? error.message : "Failed to load trader data.");
+      }}
     }}
 
+    renderColumnFilters();
     load();
     setInterval(load, 30000);
   </script>
@@ -1183,7 +1360,11 @@ class DashboardServer:
                     return
                 if parsed.path == "/api/dashboard":
                     limit = _parse_limit(parsed.query)
-                    payload = _dashboard_payload(db_path, limit)
+                    try:
+                        payload = _dashboard_payload(db_path, limit)
+                    except sqlite3.OperationalError as exc:
+                        self._respond_json_error(str(exc), status=HTTPStatus.SERVICE_UNAVAILABLE)
+                        return
                     self._respond_json(payload)
                     return
                 if parsed.path.startswith("/trader/"):
@@ -1192,9 +1373,13 @@ class DashboardServer:
                     return
                 if parsed.path.startswith("/api/trader/"):
                     trader_name = unquote(parsed.path.removeprefix("/api/trader/"))
-                    payload = _trader_payload(db_path, trader_name)
+                    try:
+                        payload = _trader_payload(db_path, trader_name)
+                    except sqlite3.OperationalError as exc:
+                        self._respond_json_error(str(exc), status=HTTPStatus.SERVICE_UNAVAILABLE)
+                        return
                     if payload is None:
-                        self.send_error(HTTPStatus.NOT_FOUND, "Trader not found")
+                        self._respond_json_error("Trader not found", status=HTTPStatus.NOT_FOUND)
                         return
                     self._respond_json(payload)
                     return
@@ -1204,9 +1389,13 @@ class DashboardServer:
                     return
                 if parsed.path.startswith("/api/token/"):
                     token_address = unquote(parsed.path.removeprefix("/api/token/"))
-                    payload = _token_payload(db_path, token_address)
+                    try:
+                        payload = _token_payload(db_path, token_address)
+                    except sqlite3.OperationalError as exc:
+                        self._respond_json_error(str(exc), status=HTTPStatus.SERVICE_UNAVAILABLE)
+                        return
                     if payload is None:
-                        self.send_error(HTTPStatus.NOT_FOUND, "Token not found")
+                        self._respond_json_error("Token not found", status=HTTPStatus.NOT_FOUND)
                         return
                     self._respond_json(payload)
                     return
@@ -1231,6 +1420,14 @@ class DashboardServer:
                 self.end_headers()
                 self.wfile.write(encoded)
 
+            def _respond_json_error(self, message: str, status: HTTPStatus) -> None:
+                encoded = json.dumps({"error": message, "status": int(status)}).encode("utf-8")
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Content-Length", str(len(encoded)))
+                self.end_headers()
+                self.wfile.write(encoded)
+
         return Handler
 
 
@@ -1243,7 +1440,7 @@ def _parse_limit(query: str) -> int:
 
 
 def _dashboard_payload(db_path: Path, limit: int) -> dict[str, object]:
-    with connect(db_path) as connection:
+    with connect(db_path, read_only=True) as connection:
         repository = Repository(connection)
         tokens = [_row_to_dict(row) for row in repository.latest_tokens(limit=min(limit, 5))]
         traders = []
@@ -1257,18 +1454,12 @@ def _dashboard_payload(db_path: Path, limit: int) -> dict[str, object]:
                 }
             )
         families = _family_groups(traders)
-        top_tokens = []
-        for row in repository.top_token_performance(limit=5):
-            item = _row_to_dict(row)
-            realized = float(item["realized_pnl"] or 0.0)
-            unrealized = float(item["unrealized_pnl"] or 0.0)
-            item["net_pnl"] = realized + unrealized
-            top_tokens.append(item)
+        top_tokens = _top_token_performance(repository, limit=5)
         traders_sorted = sorted(traders, key=lambda item: float(item["net_pnl"]), reverse=True)
         best_traders = traders_sorted[:3]
         worst_traders = list(reversed(traders_sorted[-3:])) if traders_sorted else []
 
-        closed_trades = sum(int(row["total_trades"]) for row in traders)
+        closed_trades = sum(int(row["closed_positions_count"]) for row in traders)
         profitable_strategies = sum(1 for row in traders if float(row["net_pnl"]) > 0)
         return {
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -1293,8 +1484,56 @@ def _row_to_dict(row: object) -> dict[str, object]:
     return dict(row)
 
 
+def _top_token_performance(repository: Repository, limit: int) -> list[dict[str, object]]:
+    rows = []
+    total_tokens = repository.total_token_count()
+    for token_row in repository.latest_tokens(limit=total_tokens):
+        token = _row_to_dict(token_row)
+        positions = [_row_to_dict(row) for row in repository.positions_for_token(str(token["token_address"]))]
+        if not positions:
+            continue
+        realized_pnl = 0.0
+        total_invested = 0.0
+        total_positions = 0
+        current_open_value = 0.0
+        unrealized_pnl = 0.0
+        for position in positions:
+            total_positions += 1
+            total_invested += float(position.get("amount_usd") or 0.0)
+            if position.get("status") == "CLOSED":
+                adjusted = _normalize_closed_position(repository, position)
+                realized_pnl += float(adjusted.get("pnl_usd") or 0.0)
+            else:
+                open_item = {
+                    "opened_market_cap": position.get("opened_market_cap"),
+                    "latest_market_cap": token.get("latest_market_cap"),
+                    "latest_liquidity_usd": token.get("latest_liquidity_usd"),
+                    "amount_usd": position.get("amount_usd"),
+                }
+                valued = _position_with_live_values(open_item)
+                current_open_value += float(valued.get("current_value") or 0.0)
+                unrealized_pnl += float(valued.get("unrealized_pnl") or 0.0)
+        rows.append(
+            {
+                "token_address": token["token_address"],
+                "symbol": token.get("symbol"),
+                "name": token.get("name"),
+                "pair_url": token.get("pair_url"),
+                "latest_market_cap": token.get("latest_market_cap"),
+                "total_positions": total_positions,
+                "total_invested": total_invested,
+                "realized_pnl": realized_pnl,
+                "unrealized_pnl": unrealized_pnl,
+                "current_open_value": current_open_value,
+                "net_pnl": realized_pnl + unrealized_pnl,
+            }
+        )
+    rows.sort(key=lambda item: (float(item["net_pnl"]), int(item["total_positions"])), reverse=True)
+    return rows[:limit]
+
+
 def _token_payload(db_path: Path, token_address: str) -> dict[str, object] | None:
-    with connect(db_path) as connection:
+    with connect(db_path, read_only=True) as connection:
         repository = Repository(connection)
         token = repository.token_detail(token_address)
         if token is None:
@@ -1307,7 +1546,7 @@ def _token_payload(db_path: Path, token_address: str) -> dict[str, object] | Non
 
 
 def _trader_payload(db_path: Path, trader_name: str) -> dict[str, object] | None:
-    with connect(db_path) as connection:
+    with connect(db_path, read_only=True) as connection:
         repository = Repository(connection)
         trader_names = set(repository.trader_names())
         if trader_name not in trader_names:
@@ -1317,7 +1556,6 @@ def _trader_payload(db_path: Path, trader_name: str) -> dict[str, object] | None
 
 def _trader_payload_from_repository(repository: Repository, trader_name: str) -> dict[str, object]:
     config = next((item for item in trader_configs() if item.name == trader_name), None)
-    closed_summary = dict(repository.trader_closed_summary(trader_name))
     open_summary = dict(repository.trader_open_summary(trader_name))
     open_rows = []
     unrealized_pnl = 0.0
@@ -1328,8 +1566,11 @@ def _trader_payload_from_repository(repository: Repository, trader_name: str) ->
         current_open_value += float(item["current_value"] or 0.0)
         open_rows.append(item)
 
-    closed_rows = [_row_to_dict(row) for row in repository.trader_closed_positions(trader_name)]
-    realized_pnl = float(closed_summary["total_pnl"] or 0.0)
+    all_closed_rows = [_normalize_closed_position(repository, _row_to_dict(row)) for row in repository.trader_closed_positions(trader_name)]
+    realized_pnl = sum(float(row.get("pnl_usd") or 0.0) for row in all_closed_rows)
+    closed_spent = sum(float(row.get("amount_usd") or 0.0) for row in all_closed_rows)
+    total_proceeds = sum(float(row.get("proceeds_usd") or 0.0) for row in all_closed_rows)
+    closed_rows = [row for row in all_closed_rows if float(row.get("pnl_usd") or 0.0) > 0]
 
     return {
         "trader_name": trader_name,
@@ -1346,11 +1587,12 @@ def _trader_payload_from_repository(repository: Repository, trader_name: str) ->
             else None
         ),
         "summary": {
-            "total_trades": int(closed_summary["total_trades"] or 0),
-            "closed_spent": float(closed_summary["total_spent"] or 0.0),
+            "total_trades": len(closed_rows),
+            "closed_positions_count": len(all_closed_rows),
+            "closed_spent": closed_spent,
             "open_spent": float(open_summary["open_spent"] or 0.0),
-            "total_invested": float(closed_summary["total_spent"] or 0.0) + float(open_summary["open_spent"] or 0.0),
-            "total_proceeds": float(closed_summary["total_proceeds"] or 0.0),
+            "total_invested": closed_spent + float(open_summary["open_spent"] or 0.0),
+            "total_proceeds": total_proceeds,
             "open_positions_count": int(open_summary["open_trades"] or 0),
             "current_open_value": current_open_value,
             "realized_pnl": realized_pnl,
@@ -1378,6 +1620,84 @@ def _position_with_live_values(item: dict[str, object]) -> dict[str, object]:
     item["current_value"] = current_value
     item["unrealized_pnl"] = pnl
     return item
+
+
+def _normalize_closed_position(repository: Repository, item: dict[str, object]) -> dict[str, object]:
+    closed_at = item.get("closed_at")
+    token_address = item.get("token_address")
+    if closed_at is None or token_address is None:
+        return item
+    closed_snapshot = repository.snapshot_at(str(token_address), int(closed_at))
+    previous_snapshot = repository.previous_snapshot_for_token(str(token_address), int(closed_at))
+    next_snapshot = repository.next_snapshot_for_token(str(token_address), int(closed_at))
+    if not _is_transient_outlier(closed_snapshot, previous_snapshot, next_snapshot):
+        return item
+
+    replacement = _best_neighbor_snapshot(previous_snapshot, next_snapshot)
+    if replacement is None:
+        return item
+
+    proceeds = _position_value_from_snapshot(
+        float(item.get("amount_usd") or 0.0),
+        float(item.get("opened_market_cap") or 0.0),
+        replacement,
+    )
+    adjusted = dict(item)
+    adjusted["closed_market_cap"] = replacement.market_cap
+    adjusted["proceeds_usd"] = proceeds
+    adjusted["pnl_usd"] = proceeds - float(item.get("amount_usd") or 0.0)
+    adjusted["adjusted_for_outlier"] = True
+    return adjusted
+
+
+def _is_transient_outlier(
+    current: LatestSnapshot | None,
+    previous: LatestSnapshot | None,
+    following: LatestSnapshot | None,
+) -> bool:
+    if current is None or previous is None or following is None:
+        return False
+    previous_market_cap = float(previous.market_cap or 0.0)
+    current_market_cap = float(current.market_cap or 0.0)
+    following_market_cap = float(following.market_cap or 0.0)
+    if previous_market_cap <= 0 or current_market_cap <= 0 or following_market_cap <= 0:
+        return False
+    market_cap_jump = current_market_cap / previous_market_cap
+    liquidity_jump = _positive_ratio(current.liquidity_usd, previous.liquidity_usd)
+    price_jump = _positive_ratio(current.price_usd, previous.price_usd)
+    reverted = following_market_cap <= current_market_cap / 20.0
+    return market_cap_jump >= 100.0 and reverted and (
+        (liquidity_jump is not None and liquidity_jump >= 100.0)
+        or (price_jump is not None and price_jump >= 100.0)
+    )
+
+
+def _best_neighbor_snapshot(
+    previous: LatestSnapshot | None,
+    following: LatestSnapshot | None,
+) -> LatestSnapshot | None:
+    candidates = [snapshot for snapshot in (previous, following) if snapshot is not None and snapshot.market_cap is not None]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda snapshot: float(snapshot.market_cap or 0.0))
+
+
+def _position_value_from_snapshot(amount_usd: float, opened_market_cap: float, snapshot: LatestSnapshot | None) -> float:
+    if snapshot is None or snapshot.market_cap is None or opened_market_cap <= 0:
+        return amount_usd
+    current_value = amount_usd * (float(snapshot.market_cap) / opened_market_cap)
+    if snapshot.liquidity_usd is None:
+        return current_value
+    return min(current_value, max(float(snapshot.liquidity_usd), 0.0))
+
+
+def _positive_ratio(current: object, previous: object) -> float | None:
+    if current is None or previous is None:
+        return None
+    previous_value = float(previous)
+    if previous_value <= 0:
+        return None
+    return float(current) / previous_value
 
 
 def _family_groups(traders: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -1432,9 +1752,9 @@ def _family_guides() -> list[dict[str, object]]:
                 "max_sell_multiple": last.sell_multiple,
                 "trader_count": len(configs),
                 "description": (
-                    "Enters immediately on the first snapshot at or above 20k market cap, then exits using the selected post-entry multiple."
+                    "Only considers tokens first detected between 20k and 100k market cap with at least 15k liquidity and 25k 24h volume, then enters on the first live snapshot at or above 20k and exits at the selected multiple."
                     if first.requires_prior_threshold is None
-                    else "Uses the first 20k-plus snapshot as a baseline, enters only after a later 2x confirmation, then exits using the selected post-entry multiple."
+                    else "Uses the same quality filters, takes the first 20k-plus snapshot as a baseline, waits for a later 2x confirmation, then exits at the selected post-entry multiple."
                 ),
             }
         )

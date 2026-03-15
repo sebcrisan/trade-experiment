@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
+from urllib.parse import quote
 from typing import Iterator
 
 
@@ -60,16 +61,36 @@ def initialize_database(db_path: Path) -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(db_path) as connection:
         connection.executescript(SCHEMA)
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("PRAGMA synchronous=NORMAL")
         connection.commit()
 
 
 @contextmanager
-def connect(db_path: Path) -> Iterator[sqlite3.Connection]:
-    initialize_database(db_path)
-    connection = sqlite3.connect(db_path)
+def connect(db_path: Path, *, read_only: bool = False) -> Iterator[sqlite3.Connection]:
+    if not db_path.exists() and not read_only:
+        initialize_database(db_path)
+    if read_only:
+        uri = f"file:{quote(str(db_path.resolve()).replace('\\', '/'))}?mode=ro"
+        connection = sqlite3.connect(uri, uri=True, timeout=30.0, isolation_level=None)
+        _configure_connection(connection, read_only=True)
+    else:
+        connection = sqlite3.connect(db_path, timeout=30.0)
+        _configure_connection(connection, read_only=False)
     connection.row_factory = sqlite3.Row
     try:
         yield connection
-        connection.commit()
+        if not read_only:
+            connection.commit()
     finally:
         connection.close()
+
+
+def _configure_connection(connection: sqlite3.Connection, *, read_only: bool) -> None:
+    connection.execute("PRAGMA busy_timeout=30000")
+    connection.execute("PRAGMA foreign_keys=ON")
+    if read_only:
+        connection.execute("PRAGMA query_only=ON")
+    else:
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute("PRAGMA synchronous=NORMAL")

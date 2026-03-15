@@ -22,14 +22,19 @@ Snapshot data is written to SQLite under `data/crypto_sim.db` by default. The da
 
 ## Strategy Model
 
-Strategies are generated programmatically, not hard-coded as four traders anymore.
+Strategies are generated programmatically from a smaller curated set.
 
 There are two strategy families:
 
-- `Direct_*`: buy immediately on the first snapshot with market cap at or above `20,000`
-- `Confirmed_*`: wait until the token has first been seen at or above `20,000`, then buy only once market cap reaches `2x` that first qualifying level
+- `Direct_*`: only consider tokens first detected between `20,000` and `100,000` market cap with at least `$15,000` liquidity and `$25,000` 24h volume, then buy on the first qualifying live snapshot at or above `20,000`
+- `Confirmed_*`: use the same quality filters, take the first `20,000+` snapshot as a baseline, then buy only once market cap later reaches `2x` that baseline
 
-For each family, sell targets are generated from `1.5x` up to `49.0x` in `0.5x` increments. That produces 192 trader variants in total.
+The current trader set is intentionally pruned to reduce noise:
+
+- `Direct`: `3.0x`, `3.5x`, `4.0x`, `4.5x`
+- `Confirmed`: `1.5x`, `2.0x`, `2.5x`
+
+That produces 7 trader variants in total.
 
 Common rules:
 
