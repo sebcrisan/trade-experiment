@@ -1,6 +1,6 @@
 # Crypto Sim
 
-Tracks newly surfaced Solana tokens from Dexscreener, stores periodic snapshots in SQLite, and simulates a large matrix of fixed-rule trading strategies against those snapshots.
+Tracks newly surfaced Solana tokens from Dexscreener, stores periodic snapshots in SQLite, and simulates a compact set of fixed-rule trading strategies against those snapshots.
 
 ## Overview
 
@@ -24,23 +24,20 @@ Snapshot data is written to SQLite under `data/crypto_sim.db` by default. The da
 
 Strategies are generated programmatically from a smaller curated set.
 
-There are two strategy families:
+The active trader set is intentionally pruned to one higher-conviction path:
 
-- `Direct_*`: only consider tokens first detected between `20,000` and `100,000` market cap with at least `$15,000` liquidity and `$25,000` 24h volume, then buy on the first qualifying live snapshot at or above `20,000`
-- `Confirmed_*`: use the same quality filters, take the first `20,000+` snapshot as a baseline, then buy only once market cap later reaches `2x` that baseline
+- `Direct_3.0x`: only consider tokens first detected between `20,000` and `100,000` market cap with at least `$20,000` liquidity and `$25,000` 24h volume, then buy on the first qualifying live snapshot at or above `20,000`
 
-The current trader set is intentionally pruned to reduce noise:
-
-- `Direct`: `3.0x`, `3.5x`, `4.0x`, `4.5x`
-- `Confirmed`: `1.5x`, `2.0x`, `2.5x`
-
-That produces 7 trader variants in total.
+That produces 1 active trader variant in total.
 
 Common rules:
 
 - each position size is fixed at `$10`
 - each trader can take at most one position per token
-- open positions are force-closed once the token has been tracked for 24 hours
+- stalled positions are closed after `6` hours if the `3.0x` target has not been reached
+- open positions are force-closed once the token has been tracked for 12 hours
+- positions are emergency-closed if realizable value falls below `50%` of stake
+- positions are emergency-closed if live liquidity drops below `$10,000`
 - exit triggers still use market-cap multiples
 - realizable value is capped by the latest observed `liquidity_usd`, so liquidity rugs cannot create fake profits
 
@@ -50,7 +47,7 @@ Common rules:
 - poll interval: `60` seconds
 - chain: `solana`
 - position size: `$10`
-- max token age before forced exit: `86400` seconds
+- max token age before forced exit: `43200` seconds
 - max pair age for new discoveries: `1800` seconds
 
 ## Commands

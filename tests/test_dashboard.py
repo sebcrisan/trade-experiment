@@ -10,7 +10,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from crypto_sim.dashboard import _trader_payload_from_repository
+from crypto_sim.dashboard import _normalize_closed_position, _trader_payload_from_repository
 from crypto_sim.repository import Repository
 
 
@@ -119,6 +119,47 @@ class DashboardPayloadTests(unittest.TestCase):
         self.assertAlmostEqual(row["closed_market_cap"], 120000.0)
         self.assertAlmostEqual(row["proceeds_usd"], 12.0)
         self.assertAlmostEqual(payload["summary"]["realized_pnl"], -3.0)
+
+    def test_closed_position_is_normalized_when_spike_lasts_multiple_ticks(self) -> None:
+        repository = _repository()
+        repository.connection.execute(
+            """
+            INSERT INTO tokens (
+                token_address, chain_id, symbol, name, first_seen_at, last_seen_at, latest_market_cap,
+                latest_price_usd, latest_liquidity_usd, latest_volume_h24, latest_checked_at
+            ) VALUES ('cluster', 'solana', 'CL', 'Cluster Token', 1000, 1300, 3800, 0.0000038, 5000, 0, 1300)
+            """
+        )
+        repository.connection.executemany(
+            """
+            INSERT INTO market_cap_history (
+                token_address, observed_at, market_cap, price_usd, liquidity_usd, volume_h24
+            ) VALUES (?, ?, ?, ?, ?, 0)
+            """,
+            [
+                ("cluster", 1000, 40_000, 0.00004, 16_000),
+                ("cluster", 1100, 3_800, 0.0000038, 5_000),
+                ("cluster", 1200, 183_840_000, 0.1838, 121_439_050.8),
+                ("cluster", 1250, 183_840_000, 0.1838, 121_439_050.8),
+                ("cluster", 1300, 3_900, 0.0000039, 5_100),
+            ],
+        )
+        position = {
+            "token_address": "cluster",
+            "amount_usd": 10.0,
+            "opened_market_cap": 40_000.0,
+            "closed_at": 1250,
+            "closed_market_cap": 183_840_000.0,
+            "proceeds_usd": 45_960.0,
+            "pnl_usd": 45_950.0,
+        }
+
+        normalized = _normalize_closed_position(repository, position)
+
+        self.assertTrue(normalized["adjusted_for_outlier"])
+        self.assertAlmostEqual(normalized["closed_market_cap"], 3_900.0)
+        self.assertAlmostEqual(normalized["proceeds_usd"], 0.975)
+        self.assertAlmostEqual(normalized["pnl_usd"], -9.025)
 
 
 if __name__ == "__main__":

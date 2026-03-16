@@ -13,6 +13,10 @@ from crypto_sim.db import connect
 from crypto_sim.repository import LatestSnapshot, Repository
 from crypto_sim.simulator import trader_configs
 
+EXTREME_SPIKE_RATIO = 100.0
+EXTREME_REVERSION_RATIO = 20.0
+EXTREME_CLUSTER_SCAN_LIMIT = 8
+
 
 HTML = """<!doctype html>
 <html lang="en">
@@ -530,7 +534,7 @@ HTML = """<!doctype html>
       <div class="section-head">
         <div>
           <h2 class="section-title">Strategy guide</h2>
-          <div class="section-copy">Two strategy families drive all generated traders. The differences below match the actual simulator rules.</div>
+          <div class="section-copy">The active strategy set is generated from the simulator rules below.</div>
         </div>
       </div>
       <div class="strategy-grid" id="strategies"></div>
@@ -1628,8 +1632,10 @@ def _normalize_closed_position(repository: Repository, item: dict[str, object]) 
     if closed_at is None or token_address is None:
         return item
     closed_snapshot = repository.snapshot_at(str(token_address), int(closed_at))
-    previous_snapshot = repository.previous_snapshot_for_token(str(token_address), int(closed_at))
-    next_snapshot = repository.next_snapshot_for_token(str(token_address), int(closed_at))
+    if closed_snapshot is None:
+        return item
+    previous_snapshot = _previous_baseline_snapshot(repository, closed_snapshot)
+    next_snapshot = _next_baseline_snapshot(repository, closed_snapshot)
     if not _is_transient_outlier(closed_snapshot, previous_snapshot, next_snapshot):
         return item
 
@@ -1650,6 +1656,46 @@ def _normalize_closed_position(repository: Repository, item: dict[str, object]) 
     return adjusted
 
 
+def _previous_baseline_snapshot(
+    repository: Repository,
+    snapshot: LatestSnapshot,
+    max_steps: int = EXTREME_CLUSTER_SCAN_LIMIT,
+) -> LatestSnapshot | None:
+    current_market_cap = float(snapshot.market_cap or 0.0)
+    if current_market_cap <= 0:
+        return repository.previous_snapshot_for_token(snapshot.token_address, snapshot.observed_at)
+
+    previous = repository.previous_snapshot_for_token(snapshot.token_address, snapshot.observed_at)
+    steps = 0
+    while previous is not None and steps < max_steps:
+        previous_market_cap = float(previous.market_cap or 0.0)
+        if previous_market_cap <= 0 or previous_market_cap <= current_market_cap / EXTREME_REVERSION_RATIO:
+            return previous
+        previous = repository.previous_snapshot_for_token(snapshot.token_address, previous.observed_at)
+        steps += 1
+    return previous
+
+
+def _next_baseline_snapshot(
+    repository: Repository,
+    snapshot: LatestSnapshot,
+    max_steps: int = EXTREME_CLUSTER_SCAN_LIMIT,
+) -> LatestSnapshot | None:
+    current_market_cap = float(snapshot.market_cap or 0.0)
+    if current_market_cap <= 0:
+        return repository.next_snapshot_for_token(snapshot.token_address, snapshot.observed_at)
+
+    following = repository.next_snapshot_for_token(snapshot.token_address, snapshot.observed_at)
+    steps = 0
+    while following is not None and steps < max_steps:
+        following_market_cap = float(following.market_cap or 0.0)
+        if following_market_cap <= 0 or following_market_cap <= current_market_cap / EXTREME_REVERSION_RATIO:
+            return following
+        following = repository.next_snapshot_for_token(snapshot.token_address, following.observed_at)
+        steps += 1
+    return following
+
+
 def _is_transient_outlier(
     current: LatestSnapshot | None,
     previous: LatestSnapshot | None,
@@ -1665,10 +1711,10 @@ def _is_transient_outlier(
     market_cap_jump = current_market_cap / previous_market_cap
     liquidity_jump = _positive_ratio(current.liquidity_usd, previous.liquidity_usd)
     price_jump = _positive_ratio(current.price_usd, previous.price_usd)
-    reverted = following_market_cap <= current_market_cap / 20.0
-    return market_cap_jump >= 100.0 and reverted and (
-        (liquidity_jump is not None and liquidity_jump >= 100.0)
-        or (price_jump is not None and price_jump >= 100.0)
+    reverted = following_market_cap <= current_market_cap / EXTREME_REVERSION_RATIO
+    return market_cap_jump >= EXTREME_SPIKE_RATIO and reverted and (
+        (liquidity_jump is not None and liquidity_jump >= EXTREME_SPIKE_RATIO)
+        or (price_jump is not None and price_jump >= EXTREME_SPIKE_RATIO)
     )
 
 
@@ -1752,7 +1798,7 @@ def _family_guides() -> list[dict[str, object]]:
                 "max_sell_multiple": last.sell_multiple,
                 "trader_count": len(configs),
                 "description": (
-                    "Only considers tokens first detected between 20k and 100k market cap with at least 15k liquidity and 25k 24h volume, then enters on the first live snapshot at or above 20k and exits at the selected multiple."
+                    "Only considers tokens first detected between 20k and 100k market cap with at least 20k liquidity and 25k 24h volume, then enters on the first live snapshot at or above 20k, exits at the selected multiple, cuts stalled trades after 6 hours, and force-exits rugs when value or liquidity collapses."
                     if first.requires_prior_threshold is None
                     else "Uses the same quality filters, takes the first 20k-plus snapshot as a baseline, waits for a later 2x confirmation, then exits at the selected post-entry multiple."
                 ),

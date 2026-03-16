@@ -19,10 +19,16 @@ class TraderConfig:
 
 ENTRY_MARKET_CAP_MIN = 20_000.0
 ENTRY_MARKET_CAP_MAX = 100_000.0
-ENTRY_LIQUIDITY_MIN = 15_000.0
+ENTRY_LIQUIDITY_MIN = 20_000.0
 ENTRY_VOLUME_MIN = 25_000.0
-DIRECT_TARGETS = (3.0, 3.5, 4.0, 4.5)
-CONFIRMED_TARGETS = (1.5, 2.0, 2.5)
+DIRECT_TARGETS = (3.0,)
+STALL_EXIT_AGE_SECONDS = 6 * 60 * 60
+ABSOLUTE_MAX_AGE_SECONDS = 12 * 60 * 60
+EMERGENCY_LIQUIDITY_MIN = 10_000.0
+EMERGENCY_VALUE_FLOOR_RATIO = 0.5
+EXTREME_SPIKE_RATIO = 100.0
+EXTREME_REVERSION_RATIO = 20.0
+EXTREME_CLUSTER_SCAN_LIMIT = 8
 
 
 def _build_traders() -> tuple[TraderConfig, ...]:
@@ -34,28 +40,14 @@ def _build_traders() -> tuple[TraderConfig, ...]:
             "buy_market_cap": ENTRY_MARKET_CAP_MIN,
             "requires_prior_threshold": None,
             "description_template": (
-                "Enters only for tokens first detected between 20k and 100k market cap with at least 15k liquidity "
+                "Enters only for tokens first detected between 20k and 100k market cap with at least 20k liquidity "
                 "and 25k 24h volume. It buys on the first qualifying live snapshot at or above 20k market cap. "
-                "After entry, it exits on the first snapshot that reaches {multiple:.1f}x of the entry market cap."
+                "After entry, it exits at {multiple:.1f}x, cuts stalled trades after 6 hours, and force-exits rugs "
+                "if realizable value falls under 50% of stake or liquidity drops below 10k."
             ),
             "label_template": "Direct {multiple:.1f}x",
             "entry_rule": "threshold",
             "targets": DIRECT_TARGETS,
-        },
-        {
-            "family": "2x Confirmation",
-            "prefix": "Confirmed",
-            "buy_market_cap": ENTRY_MARKET_CAP_MIN,
-            "requires_prior_threshold": ENTRY_MARKET_CAP_MIN,
-            "description_template": (
-                "Uses only tokens first detected between 20k and 100k market cap with at least 15k liquidity "
-                "and 25k 24h volume. It takes the first 20k-plus snapshot as a baseline. "
-                "It only enters later, once market cap reaches 2x that baseline, and then exits on the first "
-                "snapshot that reaches {multiple:.1f}x of its actual entry market cap."
-            ),
-            "label_template": "Confirmed {multiple:.1f}x",
-            "entry_rule": "double_from_baseline",
-            "targets": CONFIRMED_TARGETS,
         },
     )
 
@@ -87,6 +79,7 @@ def evaluate_traders(
     position_size_usd: float,
     max_token_age_seconds: int,
 ) -> None:
+    effective_max_age_seconds = min(max_token_age_seconds, ABSOLUTE_MAX_AGE_SECONDS)
     latest_snapshots = repository.latest_snapshots_for_tokens(token_states.keys())
     first_snapshots = repository.first_snapshots_for_tokens(token_states.keys())
     suspicious_tokens = {
@@ -124,11 +117,31 @@ def evaluate_traders(
         if suspicious_tokens.get(position.token_address):
             continue
         trader = _trader_config(position.trader_name)
-        age_seconds = observed_at - state.first_seen_at
+        age_seconds = observed_at - position.opened_at
         multiple = current_market_cap / position.opened_market_cap
+        proceeds = _position_value(position.amount_usd, position.opened_market_cap, snapshot)
+        emergency_floor = position.amount_usd * EMERGENCY_VALUE_FLOOR_RATIO
+        liquidity_now = float(snapshot.liquidity_usd) if snapshot is not None and snapshot.liquidity_usd is not None else None
 
-        if multiple >= trader.sell_multiple:
-            proceeds = _position_value(position.amount_usd, position.opened_market_cap, snapshot)
+        if proceeds <= emergency_floor:
+            repository.close_position(
+                position_id=position.id,
+                closed_at=observed_at,
+                closed_market_cap=current_market_cap,
+                proceeds_usd=proceeds,
+                pnl_usd=proceeds - position.amount_usd,
+                close_reason="emergency_value_exit",
+            )
+        elif liquidity_now is not None and liquidity_now < EMERGENCY_LIQUIDITY_MIN:
+            repository.close_position(
+                position_id=position.id,
+                closed_at=observed_at,
+                closed_market_cap=current_market_cap,
+                proceeds_usd=proceeds,
+                pnl_usd=proceeds - position.amount_usd,
+                close_reason="emergency_liquidity_exit",
+            )
+        elif multiple >= trader.sell_multiple:
             repository.close_position(
                 position_id=position.id,
                 closed_at=observed_at,
@@ -137,8 +150,16 @@ def evaluate_traders(
                 pnl_usd=proceeds - position.amount_usd,
                 close_reason=f"target_{trader.sell_multiple:.2f}x",
             )
-        elif age_seconds >= max_token_age_seconds:
-            proceeds = _position_value(position.amount_usd, position.opened_market_cap, snapshot)
+        elif age_seconds >= STALL_EXIT_AGE_SECONDS:
+            repository.close_position(
+                position_id=position.id,
+                closed_at=observed_at,
+                closed_market_cap=current_market_cap,
+                proceeds_usd=proceeds,
+                pnl_usd=proceeds - position.amount_usd,
+                close_reason="stale_exit_6h",
+            )
+        elif age_seconds >= effective_max_age_seconds:
             repository.close_position(
                 position_id=position.id,
                 closed_at=observed_at,
@@ -161,8 +182,28 @@ def _position_value(amount_usd: float, opened_market_cap: float, snapshot: Lates
 def _latest_snapshot_looks_suspicious(repository: Repository, snapshot: LatestSnapshot | None) -> bool:
     if snapshot is None:
         return False
+    baseline = _previous_baseline_snapshot(repository, snapshot)
+    return _is_extreme_snapshot_jump(baseline, snapshot)
+
+
+def _previous_baseline_snapshot(
+    repository: Repository,
+    snapshot: LatestSnapshot,
+    max_steps: int = EXTREME_CLUSTER_SCAN_LIMIT,
+) -> LatestSnapshot | None:
+    current_market_cap = float(snapshot.market_cap or 0.0)
+    if current_market_cap <= 0:
+        return repository.previous_snapshot_for_token(snapshot.token_address, snapshot.observed_at)
+
     previous = repository.previous_snapshot_for_token(snapshot.token_address, snapshot.observed_at)
-    return _is_extreme_snapshot_jump(previous, snapshot)
+    steps = 0
+    while previous is not None and steps < max_steps:
+        previous_market_cap = float(previous.market_cap or 0.0)
+        if previous_market_cap <= 0 or previous_market_cap <= current_market_cap / EXTREME_REVERSION_RATIO:
+            return previous
+        previous = repository.previous_snapshot_for_token(snapshot.token_address, previous.observed_at)
+        steps += 1
+    return previous
 
 
 def _is_extreme_snapshot_jump(previous: LatestSnapshot | None, current: LatestSnapshot | None) -> bool:
@@ -174,13 +215,13 @@ def _is_extreme_snapshot_jump(previous: LatestSnapshot | None, current: LatestSn
         return False
 
     market_cap_jump = current_market_cap / previous_market_cap
-    if market_cap_jump < 100.0:
+    if market_cap_jump < EXTREME_SPIKE_RATIO:
         return False
 
     price_jump = _positive_ratio(current.price_usd, previous.price_usd)
     liquidity_jump = _positive_ratio(current.liquidity_usd, previous.liquidity_usd)
-    return (price_jump is not None and price_jump >= 100.0) or (
-        liquidity_jump is not None and liquidity_jump >= 100.0
+    return (price_jump is not None and price_jump >= EXTREME_SPIKE_RATIO) or (
+        liquidity_jump is not None and liquidity_jump >= EXTREME_SPIKE_RATIO
     )
 
 

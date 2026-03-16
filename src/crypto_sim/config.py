@@ -13,5 +13,5 @@ class Settings:
     poll_interval_seconds: int = 60
     chain_id: str = "solana"
     position_size_usd: float = 10.0
-    max_token_age_seconds: int = 24 * 60 * 60
+    max_token_age_seconds: int = 12 * 60 * 60
     max_pair_age_seconds: int = 30 * 60
